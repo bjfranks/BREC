@@ -26,6 +26,8 @@ from torch_geometric.utils.convert import from_networkx
 from torch_geometric.nn import GINConv, GINEConv, global_add_pool
 import torch_geometric.transforms as T
 
+from Xent_Loss import nt_bxent_loss
+
 
 NUM_RELABEL = 32
 P_NORM = 2
@@ -36,7 +38,7 @@ SAMPLE_NUM = 400
 EPOCH = 50
 MARGIN = 0.0
 LEARNING_RATE = 1e-3
-THRESHOLD = 5.0
+THRESHOLD = 72.34
 BATCH_SIZE = 16
 WEIGHT_DECAY = 1e-5
 LOSS_THRESHOLD = 0.00
@@ -75,6 +77,12 @@ parser.add_argument(
     type=str,
     default="none",
     help="Options are ['none', 'ports', 'ids', 'random', 'dropout']",
+)
+parser.add_argument(
+    "--random",
+    type=str,
+    default="gaussian",
+    help="Options are ['gaussian', 'RNI', 'binary']",#TODO
 )
 parser.add_argument("--prob", type=int, default=-1)
 parser.add_argument("--num_runs", type=int, default=50)
@@ -203,7 +211,7 @@ def get_model(args, num_nodes, num_features, device):
                         nn.BatchNorm1d(dim),
                         nn.ReLU(),
                         nn.Linear(dim, dim),
-                    )
+                    ), train_eps=True
                 )
             )
             self.bns.append(nn.BatchNorm1d(dim))
@@ -218,7 +226,7 @@ def get_model(args, num_nodes, num_features, device):
                             nn.BatchNorm1d(dim),
                             nn.ReLU(),
                             nn.Linear(dim, dim),
-                        )
+                        ), train_eps=True
                     )
                 )
                 self.bns.append(nn.BatchNorm1d(dim))
@@ -238,29 +246,49 @@ def get_model(args, num_nodes, num_features, device):
             edge_index = data.edge_index
             batch = data.batch
 
+            x = x.unsqueeze(0).expand(num_runs, -1, -1).clone()
+
             if args.augmentation == "ids":
                 x = torch.cat([x, data.id.float()], dim=1)
             elif args.augmentation == "random":
-                x = torch.cat(
-                    [x, torch.randint(0, 100, (x.size(0), 1), device=x.device) / 100.0],
-                    dim=1,
-                )
+                if args.random == "gaussian":
+                    x = torch.cat(
+                        [x, torch.rand((x.size(0), x.size(1), 1), device=x.device)],
+                        dim=2,
+                    )
+                if args.random == "RNI":
+                    x = torch.cat(
+                        [x, torch.randint(0, 100, (x.size(0), x.size(1), 1), device=x.device) / 100.0],#torch.randint(0, 2, (x.size(0), x.size(1), 1), device=x.device)],#
+                        dim=2,
+                    )
+                if args.random == "binary": #TODO change this to be more structured and less random
+                    x = torch.cat(
+                        [x, torch.randint(0, 2, (x.size(0), x.size(1), 1), device=x.device)],
+                        dim=2,
+                    )
+            #print(x)
 
             outs = [x]
+            x = x.view(-1, x.size(-1))
+            run_edge_index = edge_index.repeat(1, num_runs) + torch.arange(
+                num_runs, device=edge_index.device
+            ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
+            #print(run_edge_index)
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
-                    x = self.convs[i](x, edge_index, data.ports.expand(-1, x.size(-1)))
+                    x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
                 else:
-                    x = self.convs[i](x, edge_index)
+                    x = self.convs[i](x, run_edge_index)
                 x = self.bns[i](x)
                 x = F.relu(x)
-                outs.append(x)
-
+                outs.append(x.view(num_runs, -1, x.size(-1)))
+            del run_edge_index
             out = None
             for i, x in enumerate(outs):
+                x = x.mean(dim=0)
                 if graph_classification:
                     x = global_add_pool(x, batch)
-                x = self.fcs[i](x)  # No dropout for these experiments
+                x = self.fcs[i](x)  # No dropout layer in these experiments
                 if out is None:
                     out = x
                 else:
@@ -424,7 +452,8 @@ def evaluation(dataset, path, device, args):
             inv_S = torch.linalg.pinv(S)
             # If you want to test on some simple graphs without permutation outputting the exact same embedding, please use inv_S with S_epsilon.
             # inv_S = torch.linalg.pinv(S + S_epsilon)
-            return torch.mm(torch.mm(D_mean.T, inv_S), D_mean)
+            # print(D, D_mean, S, inv_S)
+            return NUM_RELABEL*torch.mm(torch.mm(D_mean.T, inv_S), D_mean)
 
     time_start = time.process_time()
 
@@ -444,48 +473,70 @@ def evaluation(dataset, path, device, args):
 
         for id in tqdm(range(part_range[0], part_range[1])):
             logger.info(f"ID: {id}")
-            model = get_model(args, num_nodes_list[id], 1, device)
-            optimizer = torch.optim.Adam(
-                model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
-            )
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
-            dataset_traintest = dataset[
-                id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
-            ]
-            dataset_reliability = dataset[
-                (id + SAMPLE_NUM)
-                * NUM_RELABEL
-                * 2 : (id + SAMPLE_NUM + 1)
-                * NUM_RELABEL
-                * 2
-            ]
-            model.train()
-            for _ in range(EPOCH):
-                traintest_loader = torch_geometric.loader.DataLoader(
-                    dataset_traintest, batch_size=BATCH_SIZE
+            for _ in range(10):
+                model = get_model(args, num_nodes_list[id], 1, device)
+                optimizer = torch.optim.Adam(
+                    model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
                 )
-                loss_all = 0
-                for data in traintest_loader:
-                    optimizer.zero_grad()
-                    pred = model(data.to(device))
-                    loss = loss_func(
-                        pred[0::2],
-                        pred[1::2],
-                        torch.tensor([-1] * (len(pred) // 2)).to(device),
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)#StepLR(optimizer, gamma=0.5, step_size=250)
+                dataset_traintest = dataset[
+                    id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
+                ]
+                dataset_reliability = dataset[
+                    (id + SAMPLE_NUM)
+                    * NUM_RELABEL
+                    * 2 : (id + SAMPLE_NUM + 1)
+                    * NUM_RELABEL
+                    * 2
+                ]
+                model.train()
+                for _ in range(EPOCH):
+                    traintest_loader = torch_geometric.loader.DataLoader(
+                        dataset_traintest, batch_size=BATCH_SIZE
                     )
-                    loss.backward()
-                    optimizer.step()
-                    loss_all += len(pred) / 2 * loss.item()
-                loss_all /= NUM_RELABEL
-                logger.info(f"Loss: {loss_all}")
-                if loss_all < LOSS_THRESHOLD:
-                    logger.info("Early Stop Here")
-                    break
-                scheduler.step(loss_all)
+                    loss_all = 0
+                    for data in traintest_loader:
+                        optimizer.zero_grad()
+                        pred = model(data.to(device))
+                        #print(pred)
+                        # apart = loss_func(
+                        #     pred[0::2],
+                        #     pred[1::2],
+                        #     torch.tensor([-1] * (len(pred) // 2)).to(device),
+                        # )
+                        # together = loss_func(
+                        #     torch.cat((pred[0::4], pred[1::4])),
+                        #     torch.cat((pred[2::4], pred[3::4])),
+                        #     torch.tensor([1] * (len(pred) // 2)).to(device),
+                        # )
+                        # # print(apart, together)
+                        # a = 1.0
+                        # loss = a*apart+(1-a)*together
+                        loss = nt_bxent_loss(pred, torch.tensor([(2*a,2*b) for a in range(len(pred)//2) for b in range(len(pred)//2)]+
+                                            [(2*a+1,2*b+1) for a in range(len(pred)//2) for b in range(len(pred)//2)]).to(device),
+                                            0.5, device)
+                        loss.backward()
+                        optimizer.step()
+                        loss_all += len(pred) / 2 * loss.item()
+                    #for name, param in model.named_parameters():
+                    #    if param.requires_grad:
+                    #        print(name, param.data)
+                    #        break
+                    loss_all /= NUM_RELABEL
+                    logger.info(f"Loss: {loss_all}")
+                    if loss_all < LOSS_THRESHOLD:
+                        logger.info("Early Stop Here")
+                        break
+                    scheduler.step(loss_all)
 
-            model.eval()
-            T_square_traintest = T2_calculation(dataset_traintest, True)
-            T_square_reliability = T2_calculation(dataset_reliability, True)
+                model.eval()
+                T_square_traintest = T2_calculation(dataset_traintest, True)
+                T_square_reliability = T2_calculation(dataset_reliability, True)
+                print(T_square_traintest, T_square_reliability)
+
+                if (T_square_traintest > THRESHOLD and T_square_reliability < THRESHOLD
+                        and not torch.isclose(T_square_traintest, T_square_reliability, atol=EPSILON_CMP)):
+                    break
 
             isomorphic_flag = False
             reliability_flag = False
