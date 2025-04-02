@@ -142,7 +142,7 @@ LOSS_THRESHOLD = args.LOSS_THRESHOLD
 torch_geometric.seed_everything(SEED)
 torch.backends.cudnn.deterministic = True
 # torch.use_deterministic_algorithms(True)
-logger.add("{args.root}/{args.logging}")
+logger.add(f"{args.root}/{args.logging}")
 
 
 def mash(input):
@@ -705,9 +705,9 @@ def evaluation(dataset, device, args):
            #139, 140, 142, 143, 149, 151, 152, 153, 154, 157, 158, 64, 111, 125, 127, 132, 133,
            #136, 137, 141, 144, 146, 150, 159, 117, 145, 148, 155, 156, 126, 130, 135, 147, 122]
 
-    file = "{args.root}/{args.random}_{args.loss}_{str(args.loss_parameter)}.pkl"
+    file = f"{args.root}/{args.random}_{args.loss}_{str(args.loss_parameter)}.pkl"
     if args.name_tag is not None:
-        file = "{args.root}/{args.name_tag}.pkl"
+        file = f"{args.root}/{args.name_tag}.pkl"
 
     for part_name in args.parts: #for part_name, part_range in part_dict.items():
         part_range = part_dict[part_name]
