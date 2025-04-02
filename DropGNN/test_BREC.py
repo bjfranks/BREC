@@ -5,6 +5,9 @@
 #   3. model construction;
 #   4. evaluation
 
+import os
+os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
+
 
 import numpy as np
 import torch
@@ -12,7 +15,8 @@ import torch_geometric
 import torch_geometric.loader
 from loguru import logger
 import time
-from BRECDataset_v3 import BRECDataset
+#from BRECDataset_v4 import BRECDataset
+from BRECDataset_Wrapper import BRECDataset
 from tqdm import tqdm
 import os
 from torch.nn import CosineEmbeddingLoss
@@ -27,21 +31,28 @@ from torch_geometric.nn import GINConv, GINEConv, global_add_pool
 import torch_geometric.transforms as T
 
 from Xent_Loss import nt_bxent_loss
+import dejavu_gi
+from torch_geometric.utils import *
+from torch_geometric.data import Batch
 
+import pickle
+
+from torch_scatter import scatter_add
+from copy import deepcopy
 
 NUM_RELABEL = 32
 P_NORM = 2
 OUTPUT_DIM = 16
 EPSILON_MATRIX = 1e-7
 EPSILON_CMP = 1e-6
-SAMPLE_NUM = 400
+SAMPLE_NUM = 500
 EPOCH = 50
 MARGIN = 0.0
 LEARNING_RATE = 1e-3
-THRESHOLD = 72.34
+THRESHOLD = 72.34 # 120.12 with 0.995 (0.995^10 > 0.95)
 BATCH_SIZE = 16
 WEIGHT_DECAY = 1e-5
-LOSS_THRESHOLD = 0.00
+LOSS_THRESHOLD = 0.05
 SEED = 2023
 
 global_var = globals().copy()
@@ -58,6 +69,7 @@ part_dict = {
     "CFI": (260, 360),
     "4-Vertex_Condition": (360, 380),
     "Distance_Regular": (380, 400),
+    "CCoHG": (400, 500),
 }
 parser = argparse.ArgumentParser(description="BREC Test")
 
@@ -76,7 +88,7 @@ parser.add_argument(
     "--augmentation",
     type=str,
     default="none",
-    help="Options are ['none', 'ports', 'ids', 'random', 'dropout']",
+    help="Options are ['none', 'ports', 'ids', 'random', 'dropout', 'PSE']",
 )
 parser.add_argument(
     "--random",
@@ -84,6 +96,26 @@ parser.add_argument(
     default="gaussian",
     help="Options are ['gaussian', 'RNI', 'binary']",#TODO
 )
+parser.add_argument(
+    "--pse",
+    type=str,
+    default="RWSE",
+    help="Options are ['RWSE', 'ElstaticPE', 'HKdiagSE']",#TODO
+)
+parser.add_argument(
+    "--loss",
+    type=str,
+    default="CosineEmbeddingLoss",
+    help="Options are ['CosineEmbeddingLoss', 'nt_bxent_loss']",#TODO
+)
+parser.add_argument("--loss_parameter", type=float, default=1)
+parser.add_argument(
+    '--parts',
+    nargs='+',
+    default=list(part_dict.keys()),
+    help='Options are a subset of '+str(part_dict.keys())
+)
+parser.add_argument("--name_tag", type=str, default=None)
 parser.add_argument("--prob", type=int, default=-1)
 parser.add_argument("--num_runs", type=int, default=50)
 parser.add_argument(
@@ -91,7 +123,9 @@ parser.add_argument(
 )  # 9 layers were used for skipcircles dataset
 parser.add_argument("--use_aux_loss", action="store_true", default=False, help='Not Supported Now!')
 parser.add_argument("--hidden_units", type=int, default=32)
-
+parser.add_argument("--added_dimensions", type=int, default=1)
+parser.add_argument("--logging", type=str, default="default.log")
+parser.add_argument("--root", type=str, default=".")
 # General settings.
 args = parser.parse_args()
 
@@ -108,6 +142,12 @@ LOSS_THRESHOLD = args.LOSS_THRESHOLD
 torch_geometric.seed_everything(SEED)
 torch.backends.cudnn.deterministic = True
 # torch.use_deterministic_algorithms(True)
+logger.add("{args.root}/{args.logging}")
+
+
+def mash(input):
+    output = torch.sum(input*torch.tensor([2 ** (input.shape[1]-1-i) for i in range(input.shape[1])], device=input.device), dim=1, dtype=torch.int64)
+    return output
 
 
 # Stage 1: pre calculation
@@ -129,10 +169,116 @@ def get_dataset(name, device):
 
     # Do something
     def makefeatures(data):
-        data.x = torch.ones((data.num_nodes, 1))
+        if data.x is None:
+            data.x = torch.ones((data.num_nodes, 1))
         data.id = torch.tensor(
             np.random.permutation(np.arange(data.num_nodes))
         ).unsqueeze(1)
+        return data
+
+    ksteps = list(range(2, 22))
+    def RWSE(data):
+        # from get_rw_landing_probs in GPSE/graphym/transform/posenc_stats.py
+        space_dim = 0
+        #if edge_weight is None:
+        edge_weight = torch.ones(data.edge_index.size(1), device=data.edge_index.device)
+        num_nodes = data.num_nodes
+        source, dest = data.edge_index[0], data.edge_index[1]
+        deg = scatter_add(edge_weight, source, dim=0, dim_size=num_nodes)  # Out degrees.
+        deg_inv = deg.pow(-1.)
+        deg_inv.masked_fill_(deg_inv == float('inf'), 0)
+
+        if data.edge_index.numel() == 0:
+            P = data.edge_index.new_zeros((1, num_nodes, num_nodes))
+        else:
+            # P = D^-1 * A
+            P = torch.diag(deg_inv) @ to_dense_adj(data.edge_index,
+                                                   max_num_nodes=num_nodes)  # 1 x (Num nodes) x (Num nodes)
+        rws = []
+        if ksteps == list(range(min(ksteps), max(ksteps) + 1)):
+            # Efficient way if ksteps are a consecutive sequence (most of the time the case)
+            Pk = P.clone().detach().matrix_power(min(ksteps))
+            for k in range(min(ksteps), max(ksteps) + 1):
+                rws.append(torch.diagonal(Pk, dim1=-2, dim2=-1) * \
+                           (k ** (space_dim / 2)))
+                Pk = Pk @ P
+        else:
+            # Explicitly raising P to power k for each k \in ksteps.
+            for k in ksteps:
+                rws.append(torch.diagonal(P.matrix_power(k), dim1=-2, dim2=-1) * \
+                           (k ** (space_dim / 2)))
+        rw_landing = torch.cat(rws, dim=0).transpose(0, 1)  # (Num nodes) x (K steps)
+        data.x = torch.cat([data.x, rw_landing], dim=1)
+        return data
+
+    EPS = 1e-6
+    def ElstaticPE(data):
+        # from  in GPSE/graphym/transform/posenc_stats.py
+        L = to_scipy_sparse_matrix(
+            *get_laplacian(data.edge_index, normalization=None, num_nodes=data.num_nodes)
+        ).todense()
+        L = torch.as_tensor(L)
+        tmp = (L.diag() ** -1)
+        tmp = torch.where(tmp < torch.inf, tmp, 0)
+        Dinv = torch.eye(L.shape[0]) * tmp
+        A = deepcopy(L).abs()
+        A.fill_diagonal_(0)
+        DinvA = Dinv.matmul(A)
+
+        evals, evecs = torch.linalg.eigh(L)
+        offset = (evals < EPS).sum().item()
+        if offset == data.num_nodes:
+            return torch.zeros(data.num_nodes, 7, dtype=torch.float32)
+
+        electrostatic = evecs[:, offset:] / evals[offset:] @ evecs[:, offset:].T
+        electrostatic = electrostatic - electrostatic.diag()
+        green_encoding = torch.stack([
+            electrostatic.min(dim=0)[0],  # Min of Vi -> j
+            electrostatic.mean(dim=0),  # Mean of Vi -> j
+            electrostatic.std(dim=0),  # Std of Vi -> j
+            electrostatic.min(dim=1)[0],  # Min of Vj -> i
+            electrostatic.std(dim=1),  # Std of Vj -> i
+            (DinvA * electrostatic).sum(dim=0),  # Mean of interaction on direct neighbour
+            (DinvA * electrostatic).sum(dim=1),  # Mean of interaction from direct neighbour
+        ], dim=1)
+        data.x = torch.cat([data.x, green_encoding], dim=1)
+        return data
+
+    kernel_times = list(range(1, 21))
+    def HKdiagSE(data):
+        # from get_heat_kernels_diag in GPSE/graphym/transform/posenc_stats.py
+
+        L_heat = to_scipy_sparse_matrix(
+            *get_laplacian(data.edge_index, normalization=None, num_nodes=data.num_nodes)
+        )
+        evals_heat, evects_heat = np.linalg.eigh(L_heat.toarray())
+        evals = torch.from_numpy(evals_heat)
+        evects = torch.from_numpy(evects_heat)
+        heat_kernels_diag = []
+        if len(kernel_times) > 0:
+            evects = F.normalize(evects, p=2., dim=0)
+
+            # Remove eigenvalues == 0 from the computation of the heat kernel
+            idx_remove = evals < 1e-8
+            evals = evals[~idx_remove]
+            evects = evects[:, ~idx_remove]
+
+            # Change the shapes for the computations
+            evals = evals.unsqueeze(-1)  # lambda_{i, ..., ...}
+            evects = evects.transpose(0, 1)  # phi_{i,j}: i-th eigvec X j-th node
+
+            # Compute the heat kernels diagonal only for each time
+            eigvec_mul = evects ** 2
+            for t in kernel_times:
+                # sum_{i>0}(exp(-2 t lambda_i) * phi_{i, j} * phi_{i, j})
+                this_kernel = torch.sum(torch.exp(-t * evals) * eigvec_mul,
+                                        dim=0, keepdim=False)
+
+                # Multiply by `t` to stabilize the values, since the gaussian height
+                # is proportional to `1/t`
+                heat_kernels_diag.append(this_kernel * (t ** (0 / 2)))
+            heat_kernels_diag = torch.stack(heat_kernels_diag, dim=0).transpose(0, 1)
+        data.x = torch.cat([data.x, heat_kernels_diag], dim=1)
         return data
 
     def addports(data):
@@ -153,7 +299,19 @@ def get_dataset(name, device):
                 ] = float(ports[i])
         return data
 
-    pre_transform = T.Compose([makefeatures, addports])
+    if args.augmentation == 'PSE':
+        name = args.pse
+        if args.pse == "RWSE":
+            pre_transform = T.Compose([makefeatures, addports, RWSE])
+            args.added_dimensions = len(ksteps)
+        if args.pse == "ElstaticPE":
+            pre_transform = T.Compose([makefeatures, addports, ElstaticPE])
+            args.added_dimensions = 7
+        if args.pse == "HKdiagSE":
+            pre_transform = T.Compose([makefeatures, addports, HKdiagSE])
+            args.added_dimensions = len(kernel_times)
+    else:
+        pre_transform = T.Compose([makefeatures, addports])
 
     dataset = BRECDataset(name=name, pre_transform=pre_transform)
     time_end = time.process_time()
@@ -188,8 +346,8 @@ def get_model(args, num_nodes, num_features, device):
         Conv = GINEConv
     elif args.augmentation == "ids":
         num_features += 1
-    elif args.augmentation == "random":
-        num_features += 1
+    elif args.augmentation == "random" or args.augmentation == "PSE":
+        num_features += args.added_dimensions
     use_aux_loss = args.use_aux_loss
 
     class GIN(nn.Module):
@@ -253,19 +411,97 @@ def get_model(args, num_nodes, num_features, device):
             elif args.augmentation == "random":
                 if args.random == "gaussian":
                     x = torch.cat(
-                        [x, torch.rand((x.size(0), x.size(1), 1), device=x.device)],
+                        [x, torch.rand((x.size(0), x.size(1), args.added_dimensions), device=x.device)],
                         dim=2,
                     )
                 if args.random == "RNI":
                     x = torch.cat(
-                        [x, torch.randint(0, 100, (x.size(0), x.size(1), 1), device=x.device) / 100.0],#torch.randint(0, 2, (x.size(0), x.size(1), 1), device=x.device)],#
+                        [x, torch.randint(0, 100, (x.size(0), x.size(1), args.added_dimensions), device=x.device) / 100.0],#torch.randint(0, 2, (x.size(0), x.size(1), 1), device=x.device)],#
                         dim=2,
                     )
                 if args.random == "binary": #TODO change this to be more structured and less random
                     x = torch.cat(
-                        [x, torch.randint(0, 2, (x.size(0), x.size(1), 1), device=x.device)],
+                        [x, torch.randint(0, 2, (x.size(0), x.size(1), args.added_dimensions), device=x.device)],
                         dim=2,
                     )
+                if args.random == 'IRNI':
+                    output = []
+                    for datum in data.to_data_list():
+                        output.append([])
+                        colors = mash(datum.x)  # [mash0(x) for x in data.x]
+                        #if self.edge_labels:
+                        #    edge_colors = mash(data.edge_attr)  # [mash0(x) for x in data.edge_attr]
+                        #else:
+                        #    edge_colors = []
+                        o = torch.full((num_runs, datum.num_nodes, 1), 0, dtype=datum.x.dtype, device=datum.x.device)
+                        for _ in range(num_runs):
+                            try:
+                                test = dejavu_gi.random_ir_paths(datum.num_nodes, datum.edge_index.T.tolist(), args.added_dimensions,
+                                                                 vertex_labels=colors, edge_labels=[],
+                                                                 fill_paths=True, directed_dimacs=True)
+                            except OSError as e:
+                                import traceback
+                                traceback.print_exc()
+                                print(datum.num_nodes, datum.edge_index.T.tolist(), self.depth, colors)#, edge_colors)
+                            k = 0
+                            for node in test[0]['base_points']:
+                                o[_, node, k] = 1
+                                k += 1
+                            output[-1].append(torch.cat([datum.x, o[_]], dim=-1))#.to(datum.x.dtype).to(datum.x.device)
+                        #output[-1] = torch.stack(output[-1])
+                    #print(type(output[0][0]))
+                    output = [torch.cat([graph[_] for graph in output]) for _ in range(num_runs)]#[Batch.from_data_list([graph[_] for graph in output]) for _ in range(num_runs)]
+                    output = torch.stack(output)
+                    x = output
+                if args.random == 'tinhofer':
+                    x1 = mash(data.x)
+                    edge_index = torch_geometric.utils.to_undirected(data.edge_index)
+                    edge_index = sort_edge_index(edge_index, num_nodes=data.x.size(0), sort_by_row=False)
+                    row, col = edge_index[0], edge_index[1]
+                    deg = degree(col, data.x.size(0), dtype=torch.long).tolist()
+
+                    color_classes = None
+                    if self.k_weak == 0: color_classes = x1.clone()
+
+                    # break symmetry in orbits of size > 1
+                    while True:
+                        # color refinement
+                        for i_cr in range(1, min(16, x1.shape[0])):
+                            out = []
+                            for node, neighbors in zip(x1.tolist(), x1[row].split(deg)):
+                                hashx = hash(tuple([node] + neighbors.sort()[0].tolist()))
+                                out.append(hashx)
+                            x1 = torch.tensor(out, device=x1.device)
+
+                            if color_classes == None and (i_cr == self.k_weak): color_classes = x1.clone()
+                        if color_classes == None: color_classes = x1.clone()  # for smaller graphs
+                        # end color refinement
+
+                        uniq, inv, counts = torch.unique(x1, return_inverse=True, return_counts=True)
+                        orbit_size = counts[inv]
+                        orbits2_pos = torch.nonzero(orbit_size > 1, as_tuple=True)[0]
+
+                        if orbits2_pos.shape[0] > 0:
+                            xs = x1[orbits2_pos]
+                            idx = torch.argmin(xs)
+                            x1[orbits2_pos[idx]] += 1  # hopefully this is unique
+                        else:  # all of size 1
+                            break
+
+                    x_out = torch.zeros((x1.shape[0], self.output_dim), device=x1.device)
+                    tmp = torch.zeros((x1.shape[0]), dtype=int, device=x1.device)
+                    mask = 2 ** torch.arange(self.output_dim - 1, -1, -1).to(x_out.device, int)
+
+                    uniq, counts = torch.unique(color_classes, return_counts=True)
+                    for color in uniq:
+                        nodes = torch.nonzero(color_classes == color, as_tuple=True)[0]
+                        ind_colors = x1[nodes]
+                        order = torch.argsort(torch.argsort(ind_colors))
+                        order = order % (2 ** self.output_dim)
+                        x_out[nodes] = order.unsqueeze(-1).bitwise_and(mask).ne(0).float()
+                        tmp[nodes] = order
+
+                    return x_out
             #print(x)
 
             outs = [x]
@@ -458,13 +694,23 @@ def evaluation(dataset, path, device, args):
     time_start = time.process_time()
 
     # Do something
-    num_nodes_list = np.load('num_node.npy', allow_pickle=True)
+    #num_nodes_list = np.load('num_node.npy', allow_pickle=True)
     cnt = 0
     correct_list = []
     fail_in_reliability = 0
     loss_func = CosineEmbeddingLoss(margin=MARGIN)
+    store = []
 
-    for part_name, part_range in part_dict.items():
+    ids = [] #[89, 112, 113, 114, 115, 116, 118, 119, 120, 121, 123, 124, 128, 129, 131, 134, 138,
+           #139, 140, 142, 143, 149, 151, 152, 153, 154, 157, 158, 64, 111, 125, 127, 132, 133,
+           #136, 137, 141, 144, 146, 150, 159, 117, 145, 148, 155, 156, 126, 130, 135, 147, 122]
+
+    file = "{args.root}/{args.random}_{args.loss}_{str(args.loss_parameter)}.pkl"
+    if args.name_tag is not None:
+        file = "{args.root}/{args.name_tag}.pkl"
+
+    for part_name in args.parts: #for part_name, part_range in part_dict.items():
+        part_range = part_dict[part_name]
         logger.info(f"{part_name} part starting ---")
 
         cnt_part = 0
@@ -473,15 +719,16 @@ def evaluation(dataset, path, device, args):
 
         for id in tqdm(range(part_range[0], part_range[1])):
             logger.info(f"ID: {id}")
-            for _ in range(10):
-                model = get_model(args, num_nodes_list[id], 1, device)
-                optimizer = torch.optim.Adam(
-                    model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
-                )
-                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)#StepLR(optimizer, gamma=0.5, step_size=250)
+            for test_count in range(10):
                 dataset_traintest = dataset[
                     id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
                 ]
+                model = get_model(args, dataset_traintest[0].num_nodes, 1, device)  # num_nodes_list[id]
+                optimizer = torch.optim.Adam(
+                    model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
+                )
+                scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer)  # StepLR(optimizer, gamma=0.5, step_size=250)
                 dataset_reliability = dataset[
                     (id + SAMPLE_NUM)
                     * NUM_RELABEL
@@ -496,28 +743,43 @@ def evaluation(dataset, path, device, args):
                     )
                     loss_all = 0
                     for data in traintest_loader:
+                        if id in ids:
+                            import networkx as nx
+                            import matplotlib.pyplot as plt
+                            print(id)
+                            ids.remove(id)
+                            for datum in data.to_data_list():
+                                g = torch_geometric.utils.to_networkx(datum, to_undirected=True)
+                                nx.draw(g)
+                                plt.show()
+
                         optimizer.zero_grad()
                         pred = model(data.to(device))
                         #print(pred)
-                        # apart = loss_func(
-                        #     pred[0::2],
-                        #     pred[1::2],
-                        #     torch.tensor([-1] * (len(pred) // 2)).to(device),
-                        # )
-                        # together = loss_func(
-                        #     torch.cat((pred[0::4], pred[1::4])),
-                        #     torch.cat((pred[2::4], pred[3::4])),
-                        #     torch.tensor([1] * (len(pred) // 2)).to(device),
-                        # )
-                        # # print(apart, together)
-                        # a = 1.0
-                        # loss = a*apart+(1-a)*together
-                        loss = nt_bxent_loss(pred, torch.tensor([(2*a,2*b) for a in range(len(pred)//2) for b in range(len(pred)//2)]+
-                                            [(2*a+1,2*b+1) for a in range(len(pred)//2) for b in range(len(pred)//2)]).to(device),
-                                            0.5, device)
+                        apart = loss_func(
+                            pred[0::2],
+                            pred[1::2],
+                            torch.tensor([-1] * (len(pred) // 2)).to(device),
+                        )
+                        together = loss_func(
+                            torch.cat((pred[0::4], pred[1::4])),
+                            torch.cat((pred[2::4], pred[3::4])),
+                            torch.tensor([1] * (len(pred) // 2)).to(device),
+                        )
+                        # print(apart, together)
+                        a = args.loss_parameter
+                        if args.loss == "CosineEmbeddingLoss":
+                            loss = a*apart+(1-a)*together
+                        elif args.loss == "nt_bxent_loss":
+                            loss = nt_bxent_loss(pred,
+                                torch.tensor([(2*a, 2*b) for a in range(len(pred)//2) for b in range(len(pred)//2)] +
+                                [(2*a+1, 2*b+1) for a in range(len(pred)//2) for b in range(len(pred)//2)]).to(device),
+                                                 0.5, device)
                         loss.backward()
                         optimizer.step()
                         loss_all += len(pred) / 2 * loss.item()
+                    #if _%5 == 0:
+                    #    print(loss_all)  # TODO remove
                     #for name, param in model.named_parameters():
                     #    if param.requires_grad:
                     #        print(name, param.data)
@@ -532,7 +794,7 @@ def evaluation(dataset, path, device, args):
                 model.eval()
                 T_square_traintest = T2_calculation(dataset_traintest, True)
                 T_square_reliability = T2_calculation(dataset_reliability, True)
-                print(T_square_traintest, T_square_reliability)
+                #print(T_square_traintest, T_square_reliability)
 
                 if (T_square_traintest > THRESHOLD and T_square_reliability < THRESHOLD
                         and not torch.isclose(T_square_traintest, T_square_reliability, atol=EPSILON_CMP)):
@@ -557,6 +819,10 @@ def evaluation(dataset, path, device, args):
                 fail_in_reliability_part += 1
             logger.info(f"isomorphic: {isomorphic_flag} {T_square_traintest}")
             logger.info(f"reliability: {reliability_flag} {T_square_reliability}")
+            #print(isomorphic_flag, reliability_flag, T_square_traintest, T_square_reliability)
+
+            #save to file here
+            store.append((part_name, id, isomorphic_flag, T_square_traintest, reliability_flag, T_square_reliability, test_count))
 
         end = time.process_time()
         time_cost_part = round(end - start, 2)
@@ -567,6 +833,11 @@ def evaluation(dataset, path, device, args):
         logger.info(
             f"Fail in reliability: {fail_in_reliability_part} / {part_range[1] - part_range[0]}"
         )
+
+        store.append(args)
+        with open(file, 'ab') as f:
+            pickle.dump(store, f)
+        store = []
 
     time_end = time.process_time()
     time_cost = round(time_end - time_start, 2)
@@ -585,7 +856,6 @@ def evaluation(dataset, path, device, args):
     logger.info(
         f"{cnt-fail_in_reliability}\t{cnt}\t{fail_in_reliability}\t{args.num_layers}\t{args.hidden_units}\t{args.num_runs}\t{OUTPUT_DIM}\t{BATCH_SIZE}\t{LEARNING_RATE}\t{WEIGHT_DECAY}\t{SEED}"
     )
-
 
 def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")

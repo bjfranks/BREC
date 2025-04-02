@@ -4,7 +4,6 @@ from torch.nn import functional as F
 
 def nt_bxent_loss(x, pos_indices, temperature, device):
     assert len(x.size()) == 2
-
     # Add indexes of the principal diagonal elements to pos_indices
     pos_indices = torch.cat([
         pos_indices,
@@ -16,7 +15,8 @@ def nt_bxent_loss(x, pos_indices, temperature, device):
     target[pos_indices[:,0], pos_indices[:,1]] = 1.0
 
     # Cosine similarity
-    xcs = F.cosine_similarity(x[None,:,:], x[:,None,:], dim=-1)
+    xcs = F.cosine_similarity(x[None, :, :], x[:, None, :], dim=-1)
+    xcs = xcs.clamp(min=-0.9999, max=0.9999)
     # Set logit of diagonal element to "inf" signifying complete
     # correlation. sigmoid(inf) = 1.0 so this will work out nicely
     # when computing the Binary Cross Entropy Loss.
@@ -30,6 +30,8 @@ def nt_bxent_loss(x, pos_indices, temperature, device):
 
     target_pos = target.bool()
     target_neg = ~target_pos
+    #print(target_pos)
+    #print(loss[target_pos])
 
     loss_pos = torch.zeros(x.size(0), x.size(0), device=device).masked_scatter(target_pos, loss[target_pos])
     loss_neg = torch.zeros(x.size(0), x.size(0), device=device).masked_scatter(target_neg, loss[target_neg])
