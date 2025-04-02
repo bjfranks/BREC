@@ -657,7 +657,7 @@ def get_model(args, num_nodes, num_features, device):
 
 # Stage 4: evaluation
 # Here is for evaluation.
-def evaluation(dataset, path, device, args):
+def evaluation(dataset, device, args):
     """
     When testing on BREC, even on the same graph, the output embedding may be different,
     because numerical precision problem occur on large graphs, and even the same graph is permuted.
@@ -849,7 +849,7 @@ def evaluation(dataset, path, device, args):
     logger.info(f"Fail in reliability: {fail_in_reliability} / {SAMPLE_NUM}")
     logger.info(correct_list)
 
-    logger.add(f"{path}/result_show.txt", format="{message}", encoding="utf-8")
+    logger.add(f"{args.root}/{args.name_tag}_show.log", format="{message}", encoding="utf-8")
     logger.info(
         "Real_correct\tCorrect\tFail\tnum_layers\thidden_units\tnum_runs\tOUTPUT_DIM\tBATCH_SIZE\tLEARNING_RATE\tWEIGHT_DECAY\tSEED"
     )
@@ -860,22 +860,14 @@ def evaluation(dataset, path, device, args):
 def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
-    OUT_PATH = "result_BREC"
-    NAME = args.augmentation
-    DATASET_NAME = "no_param"
-    path = os.path.join(OUT_PATH, NAME)
-    os.makedirs(path, exist_ok=True)
-
     logger.remove(handler_id=None)
-    LOG_NAME = os.path.join(path, "log.txt")
-    logger.add(LOG_NAME, rotation="5MB")
 
     logger.info(args)
 
     pre_calculation()
-    dataset = get_dataset(name=DATASET_NAME, device=device)
+    dataset = get_dataset(name="no_param", device=device)
     # model = get_model(args, device)
-    evaluation(dataset, OUT_PATH, device, args)
+    evaluation(dataset, device, args)
 
 
 if __name__ == "__main__":
