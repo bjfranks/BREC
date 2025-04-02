@@ -112,7 +112,7 @@ parser.add_argument("--loss_parameter", type=float, default=1)
 parser.add_argument(
     '--parts',
     nargs='+',
-    default=list(part_dict.keys()),
+    default=[],#list(part_dict.keys()),
     help='Options are a subset of '+str(part_dict.keys())
 )
 parser.add_argument("--name_tag", type=str, default=None)
