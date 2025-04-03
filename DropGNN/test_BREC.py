@@ -94,7 +94,7 @@ parser.add_argument(
     "--random",
     type=str,
     default="gaussian",
-    help="Options are ['gaussian', 'RNI', 'binary']",#TODO
+    help="Options are ['gaussian', 'RNI', 'binary', 'IRNI']",#TODO
 )
 parser.add_argument(
     "--pse",
