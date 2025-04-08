@@ -286,7 +286,7 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, heat_kernels_diag], dim=1)
         return data
 
-    k_list = list(range(2, 4))#9
+    k_list = list(range(2, 6))#9
     def CycleSE(data):
         graph = to_networkx(data)
         cycles = list(nx.simple_cycles(graph, length_bound=max(k_list)))
@@ -308,7 +308,6 @@ def get_dataset(name, device):
 
         #x[ : , 1: ] /= 2
         data.x = torch.cat([data.x, x], dim=1)
-        print(data.x)
         return data
 
 
