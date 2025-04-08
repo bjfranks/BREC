@@ -40,16 +40,20 @@ import pickle
 from torch_scatter import scatter_add
 from copy import deepcopy
 
+import networkx as nx
+from collections import Counter
+import itertools
+
 NUM_RELABEL = 32
 P_NORM = 2
 OUTPUT_DIM = 16
 EPSILON_MATRIX = 1e-7
 EPSILON_CMP = 1e-6
-SAMPLE_NUM = 500
+SAMPLE_NUM = 600
 EPOCH = 50
 MARGIN = 0.0
 LEARNING_RATE = 1e-3
-THRESHOLD = 72.34 # 120.12 with 0.995 (0.995^10 > 0.95)
+THRESHOLD = 120.12 # with 0.995 (0.995^10 > 0.95) original 72.34
 BATCH_SIZE = 16
 WEIGHT_DECAY = 1e-5
 LOSS_THRESHOLD = 0.05
@@ -70,6 +74,7 @@ part_dict = {
     "4-Vertex_Condition": (360, 380),
     "Distance_Regular": (380, 400),
     "CCoHG": (400, 500),
+    "3r2r": (500, 600),
 }
 parser = argparse.ArgumentParser(description="BREC Test")
 
@@ -100,7 +105,7 @@ parser.add_argument(
     "--pse",
     type=str,
     default="RWSE",
-    help="Options are ['RWSE', 'ElstaticPE', 'HKdiagSE']",#TODO
+    help="Options are ['RWSE', 'ElstaticPE', 'HKdiagSE', 'CycleSE', 'LapPE', 'RLapPE']",#TODO
 )
 parser.add_argument(
     "--loss",
@@ -281,6 +286,48 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, heat_kernels_diag], dim=1)
         return data
 
+    k_list = list(range(2, 4))#9
+    def CycleSE(data):
+        graph = to_networkx(data)
+        cycles = list(nx.simple_cycles(graph, length_bound=max(k_list)))
+
+        x = torch.zeros((data.x.size()[0], len(k_list)))
+        #for cycle in cycles:
+        #    size = len(cycle)
+        #    if size in k_list:
+        #        for node in cycle:
+        #            x[node, k_list.index(size)] += 1
+        # For efficiency
+        cycles.sort(key=lambda c: len(c))
+        cycles_len = len(cycles)
+        for i, k in enumerate(k_list):
+            min_i = next((x for x in range(cycles_len) if len(cycles[x])==k), 0)
+            max_i = next((x for x in reversed(range(cycles_len)) if len(cycles[x])==k), 0)
+            for node, count in Counter(itertools.chain.from_iterable(cycles[min_i:max_i+1])).items():
+                x[node, i] = count/2
+
+        #x[ : , 1: ] /= 2
+        data.x = torch.cat([data.x, x], dim=1)
+        print(data.x)
+        return data
+
+
+    frequencies = 7
+    def LapPE(data):
+        # from  in GPSE/graphym/transform/posenc_stats.py
+        L = to_scipy_sparse_matrix(
+            *get_laplacian(data.edge_index, normalization=None, num_nodes=data.num_nodes)
+        )
+        EigVal, EigVec = np.linalg.eigh(L.toarray())
+        EigVec = EigVec[:, EigVal.argsort()]  # increasing order
+        pos_enc = torch.from_numpy(EigVec[:, :frequencies]).float()
+        if pos_enc.size()[1] != frequencies:
+            print(EigVec)
+            print(pos_enc.size(), data.x.size())
+            print(data.edge_index)
+        data.x = torch.cat([data.x, pos_enc], dim=1)
+        return data
+
     def addports(data):
         data.ports = torch.zeros(data.num_edges, 1)
         degs = degree(
@@ -310,6 +357,12 @@ def get_dataset(name, device):
         if args.pse == "HKdiagSE":
             pre_transform = T.Compose([makefeatures, addports, HKdiagSE])
             args.added_dimensions = len(kernel_times)
+        if args.pse == "CycleSE":
+            pre_transform = T.Compose([makefeatures, addports, CycleSE])
+            args.added_dimensions = len(k_list)
+        if args.pse == "LapPE" or args.pse == "RLapPE":
+            pre_transform = T.Compose([makefeatures, addports, LapPE])
+            args.added_dimensions = frequencies
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -502,14 +555,29 @@ def get_model(args, num_nodes, num_features, device):
                         tmp[nodes] = order
 
                     return x_out
-            #print(x)
+            elif args.augmentation == "PSE":
+                if args.pse == 'RLapPE':
+                    x_shuffle = x[:, :, -args.added_dimensions:]
+                    count = torch.bincount(data.batch)
+                    x_shuffle = x_shuffle[:,
+                                torch.cat([torch.randperm(i, device=x.device)+j
+                                           for i, j in zip(count, torch.cat([torch.zeros(1, device=x.device,
+                                                                                         dtype=torch.int),
+                                                                             torch.cumsum(count, 0)[:-1]]))]),
+                                :]
+                    signflips = 2*torch.randint(2, (x.size(0), x.size(1), 1), device=x.device)-1
+                    x_shuffle = x_shuffle*signflips
+                    x_rest = x[:, :, :-args.added_dimensions]
+                    x = torch.cat(
+                        [x_shuffle, x_rest],
+                        dim=2,
+                    )
 
             outs = [x]
             x = x.view(-1, x.size(-1))
             run_edge_index = edge_index.repeat(1, num_runs) + torch.arange(
                 num_runs, device=edge_index.device
             ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
-            #print(run_edge_index)
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
@@ -679,10 +747,14 @@ def evaluation(dataset, device, args):
                 pred_1_list.extend(pred[1::2])
             X = torch.cat([x.reshape(1, -1) for x in pred_0_list], dim=0).T
             Y = torch.cat([x.reshape(1, -1) for x in pred_1_list], dim=0).T
+            #big = torch.max(torch.max(torch.abs(X)), torch.max(torch.abs(Y)))
+            #X/=big
+            #Y/=big
             if log_flag:
                 logger.info(f"X_mean = {torch.mean(X, dim=1)}")
                 logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
             D = X - Y
+            D = torch.where(torch.abs(D) < torch.abs(X)/10000, 0, D) # Avoids floating point subtraction errors for similar embeddings
             D_mean = torch.mean(D, dim=1).reshape(-1, 1)
             S = torch.cov(D)
             inv_S = torch.linalg.pinv(S)
@@ -794,7 +866,7 @@ def evaluation(dataset, device, args):
                 model.eval()
                 T_square_traintest = T2_calculation(dataset_traintest, True)
                 T_square_reliability = T2_calculation(dataset_reliability, True)
-                #print(T_square_traintest, T_square_reliability)
+                print(T_square_traintest, T_square_reliability)
 
                 if (T_square_traintest > THRESHOLD and T_square_reliability < THRESHOLD
                         and not torch.isclose(T_square_traintest, T_square_reliability, atol=EPSILON_CMP)):
