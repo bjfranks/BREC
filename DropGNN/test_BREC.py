@@ -44,6 +44,8 @@ import networkx as nx
 from collections import Counter
 import itertools
 
+import algos
+
 NUM_RELABEL = 32
 P_NORM = 2
 OUTPUT_DIM = 16
@@ -147,6 +149,8 @@ LOSS_THRESHOLD = args.LOSS_THRESHOLD
 torch_geometric.seed_everything(SEED)
 torch.backends.cudnn.deterministic = True
 # torch.use_deterministic_algorithms(True)
+if args.logging == "default.log" and args.name_tag is not None:
+    args.logging = f"{args.name_tag}.log"
 logger.add(f"{args.root}/{args.logging}")
 
 
@@ -327,6 +331,17 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, pos_enc], dim=1)
         return data
 
+
+    minlength = 10
+    def SPDPE(data):
+        dense_adj = torch.squeeze(to_dense_adj(data.edge_index, max_num_nodes=data.num_nodes).type(torch.int))
+        shortest_path_result, path = algos.floyd_warshall(dense_adj.numpy())
+        node_to_node_shortest_paths = torch.from_numpy(shortest_path_result).long()
+        spatial_pos = torch.stack([torch.bincount(_node_to_node_shortest_paths, minlength=minlength)[:minlength]
+                                   for _node_to_node_shortest_paths in node_to_node_shortest_paths])
+        data.x = torch.cat([data.x, spatial_pos], dim=1)
+        return data
+
     def addports(data):
         data.ports = torch.zeros(data.num_edges, 1)
         degs = degree(
@@ -362,6 +377,9 @@ def get_dataset(name, device):
         if args.pse == "LapPE" or args.pse == "RLapPE":
             pre_transform = T.Compose([makefeatures, addports, LapPE])
             args.added_dimensions = frequencies
+        if args.pse == "SPDPE":
+            pre_transform = T.Compose([makefeatures, addports, SPDPE])
+            args.added_dimensions = minlength
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -741,18 +759,25 @@ def evaluation(dataset, device, args):
             pred_0_list = []
             pred_1_list = []
             for data in loader:
+                #torch.set_printoptions(threshold=10_000)
+                #print(data.x)
                 pred = model(data.to(device)).detach()
+                #print(model.state_dict())
                 pred_0_list.extend(pred[0::2])
                 pred_1_list.extend(pred[1::2])
+                #print(pred_0_list, pred_1_list)
             X = torch.cat([x.reshape(1, -1) for x in pred_0_list], dim=0).T
             Y = torch.cat([x.reshape(1, -1) for x in pred_1_list], dim=0).T
             #big = torch.max(torch.max(torch.abs(X)), torch.max(torch.abs(Y)))
             #X/=big
             #Y/=big
-            if log_flag:
-                logger.info(f"X_mean = {torch.mean(X, dim=1)}")
-                logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
             D = X - Y
+            if log_flag:
+                logger.info(f"X = {X}")
+                logger.info(f"X_mean = {torch.mean(X, dim=1)}")
+                logger.info(f"Y = {Y}")
+                logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
+                logger.info(f"D = {D}")
             D = torch.where(torch.abs(D) < torch.abs(X)/10000, 0, D) # Avoids floating point subtraction errors for similar embeddings
             D_mean = torch.mean(D, dim=1).reshape(-1, 1)
             S = torch.cov(D)
@@ -760,7 +785,10 @@ def evaluation(dataset, device, args):
             # If you want to test on some simple graphs without permutation outputting the exact same embedding, please use inv_S with S_epsilon.
             # inv_S = torch.linalg.pinv(S + S_epsilon)
             # print(D, D_mean, S, inv_S)
-            return NUM_RELABEL*torch.mm(torch.mm(D_mean.T, inv_S), D_mean)
+            result = NUM_RELABEL*torch.mm(torch.mm(D_mean.T, inv_S), D_mean)
+            if log_flag:
+                logger.info(f"result = {result}")
+            return result
 
     time_start = time.process_time()
 
@@ -825,6 +853,7 @@ def evaluation(dataset, device, args):
                                 plt.show()
 
                         optimizer.zero_grad()
+                        #print(data.x)
                         pred = model(data.to(device))
                         #print(pred)
                         apart = loss_func(
@@ -939,7 +968,6 @@ def main():
     dataset = get_dataset(name="no_param", device=device)
     # model = get_model(args, device)
     evaluation(dataset, device, args)
-
 
 if __name__ == "__main__":
     main()
