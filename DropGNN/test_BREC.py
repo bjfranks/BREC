@@ -823,6 +823,8 @@ def evaluation(dataset, device, args):
                 logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
                 logger.info(f"D = {D}")
             D = torch.where(torch.abs(D) < torch.abs(X)/1000, 0, D) # Avoids floating point subtraction errors for similar embeddings
+            if log_flag:
+                logger.info(f"newD = {D}")
             D_mean = torch.mean(D, dim=1).reshape(-1, 1)
             S = torch.cov(D)
             inv_S = torch.linalg.pinv(S)
