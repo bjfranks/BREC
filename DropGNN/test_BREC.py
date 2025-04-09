@@ -151,7 +151,6 @@ torch.backends.cudnn.deterministic = True
 # torch.use_deterministic_algorithms(True)
 if args.logging == "default.log" and args.name_tag is not None:
     args.logging = f"{args.name_tag}.log"
-logger.add(f"{args.root}/{args.logging}")
 
 
 def mash(input):
@@ -342,6 +341,48 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, spatial_pos], dim=1)
         return data
 
+
+    maxlength = 10
+    def RDPE(data):
+        N = data.num_nodes
+        adj = np.zeros((N, N), dtype=np.float32)
+        adj[data.edge_index[0, :], data.edge_index[1, :]] = 1.0
+
+        # 2) connected_components
+        g = nx.Graph(adj)
+        g_components_list = [g.subgraph(c).copy() for c in nx.connected_components(g)]
+        g_resistance_matrix = np.zeros((N, N)) - 1.0
+        g_index = 0
+        for item in g_components_list:
+            cur_adj = nx.to_numpy_array(item)
+            cur_num_nodes = cur_adj.shape[0]
+            cur_res_dis = np.linalg.pinv(
+                np.diag(cur_adj.sum(axis=-1)) - cur_adj + np.ones((cur_num_nodes, cur_num_nodes),
+                                                                  dtype=np.float32) / cur_num_nodes
+            ).astype(np.float32)
+            A = np.diag(cur_res_dis)[:, None]
+            B = np.diag(cur_res_dis)[None, :]
+            cur_res_dis = A + B - 2 * cur_res_dis
+            g_resistance_matrix[g_index:g_index + cur_num_nodes, g_index:g_index + cur_num_nodes] = cur_res_dis
+            g_index += cur_num_nodes
+        g_cur_index = []
+        for item in g_components_list:
+            g_cur_index.extend(list(item.nodes))
+        ori_idx = np.arange(N)
+        g_resistance_matrix[g_cur_index, :] = g_resistance_matrix[ori_idx, :]
+        g_resistance_matrix[:, g_cur_index] = g_resistance_matrix[:, ori_idx]
+
+        if g_resistance_matrix.max() > N - 1:
+            print(f'error: {g_resistance_matrix}')
+        g_resistance_matrix[g_resistance_matrix == -1.0] = 512.0
+        res_matrix = np.zeros((N, maxlength), dtype=np.float32)
+        l = min(maxlength, N)
+        res_matrix[:, :l] = g_resistance_matrix[:, :l]
+        res_matrix = torch.from_numpy(res_matrix)
+        res_matrix, _ = torch.sort(res_matrix, descending=True)
+        data.x = torch.cat([data.x, res_matrix], dim=1)
+        return data
+
     def addports(data):
         data.ports = torch.zeros(data.num_edges, 1)
         degs = degree(
@@ -377,9 +418,12 @@ def get_dataset(name, device):
         if args.pse == "LapPE" or args.pse == "RLapPE":
             pre_transform = T.Compose([makefeatures, addports, LapPE])
             args.added_dimensions = frequencies
-        if args.pse == "SPDPE":
+        if args.pse == "SPDPE":#RDPE
             pre_transform = T.Compose([makefeatures, addports, SPDPE])
             args.added_dimensions = minlength
+        if args.pse == "RDPE":
+            pre_transform = T.Compose([makefeatures, addports, RDPE])
+            args.added_dimensions = 0
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -961,7 +1005,7 @@ def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
     logger.remove(handler_id=None)
-
+    logger.add(f"{args.root}/{args.logging}")
     logger.info(args)
 
     pre_calculation()
