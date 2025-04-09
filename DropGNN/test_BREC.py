@@ -46,6 +46,11 @@ import itertools
 
 import algos
 
+from primefac import primefac
+from torch_geometric.transforms import BaseTransform
+from typing import Dict
+from collections import deque
+
 NUM_RELABEL = 32
 P_NORM = 2
 OUTPUT_DIM = 16
@@ -95,7 +100,7 @@ parser.add_argument(
     "--augmentation",
     type=str,
     default="none",
-    help="Options are ['none', 'ports', 'ids', 'random', 'dropout', 'PSE']",
+    help="Options are ['none', 'ports', 'ids', 'random', 'dropout', 'PSE', 'rewiring']",
 )
 parser.add_argument(
     "--random",
@@ -108,6 +113,12 @@ parser.add_argument(
     type=str,
     default="RWSE",
     help="Options are ['RWSE', 'ElstaticPE', 'HKdiagSE', 'CycleSE', 'LapPE', 'RLapPE']",#TODO
+)
+parser.add_argument(
+    "--rewire",
+    type=str,
+    default="CGP",
+    help="Options are ['CGP']",#TODO
 )
 parser.add_argument(
     "--loss",
@@ -168,6 +179,44 @@ def pre_calculation(*args, **kwargs):
     time_end = time.process_time()
     time_cost = round(time_end - time_start, 2)
     logger.info(f"pre-calculation time cost: {time_cost}")
+
+
+# Simple code to generate a Cayley graph, from https://github.com/josephjwilson/cayley_graph_propagation/blob/main/Cayley_Graph_Propagation.ipynb
+def get_cayley_graph(n):
+    """
+        Get the edge index of the Cayley graph (Cay(SL(2, Z_n); S_n)).
+    """
+    generators = np.array([
+        [[1, 1], [0, 1]],
+        [[1, n-1], [0, 1]],
+        [[1, 0], [1, 1]],
+        [[1, 0], [n-1, 1]]])
+    ind = 1
+
+    queue = deque([np.array([[1, 0], [0, 1]])])
+    nodes = {(1, 0, 0, 1): 0}
+
+    senders = []
+    receivers = []
+
+    while queue:
+        x = queue.pop()
+        x_flat = (x[0][0], x[0][1], x[1][0], x[1][1])
+        assert x_flat in nodes
+        ind_x = nodes[x_flat]
+        for i in range(4):
+            tx = np.matmul(x, generators[i])
+            tx = np.mod(tx, n)
+            tx_flat = (tx[0][0], tx[0][1], tx[1][0], tx[1][1])
+            if tx_flat not in nodes:
+                nodes[tx_flat] = ind
+                ind += 1
+                queue.append(tx)
+            ind_tx = nodes[tx_flat]
+
+            senders.append(ind_x)
+            receivers.append(ind_tx)
+    return torch.tensor([senders, receivers])
 
 
 # Stage 2: dataset construction
@@ -383,6 +432,81 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, res_matrix], dim=1)
         return data
 
+    class ExpanderTransform(BaseTransform):
+        def __init__(self, type):
+            super(ExpanderTransform).__init__()
+
+            self.type = type
+            self.cayley_memory: Dict[int, torch.Tensor] = {}
+            self.cayley_node_memory: Dict[int, torch.Tensor] = {}
+
+        def __call__(self, data):
+            num_nodes = data.num_nodes
+
+            cayley_n = self._get_cayley_n(num_nodes)
+
+            # EGP
+            if self.type == 'EGP':
+                data.expander_edge_index = self._get_egp_edge_index(cayley_n, num_nodes)
+                return data
+
+            # CGP
+            data.expander_edge_index, cayley_num_nodes = self._get_cgp_edge_index(cayley_n)
+
+            # Get the number of virtual nodes needed
+            virtual_num_nodes = cayley_num_nodes - num_nodes
+
+            # Create a boolean mask to indicate if the node is a virtual node
+            data.virtual_node_mask = torch.cat(
+                (torch.zeros(num_nodes, dtype=torch.bool), torch.ones(virtual_num_nodes, dtype=torch.bool)), axis=0)
+
+            # Update the input features to have the zero-node embeddings for the virtual nodes
+            data.num_nodes = cayley_num_nodes
+            data.cayley_num_nodes = cayley_num_nodes
+            data.x = torch.cat((data.x, torch.zeros((virtual_num_nodes, data.x.shape[1]), dtype=data.x.dtype)), axis=0)
+
+            return data
+
+        # Determine the Cayley graph size. This does not limit the graph size by using a pre-defined bank as proposed by EGP.
+        def _get_cayley_n(self, num_nodes):
+            n = 1
+            while self._cayley_graph_size(n) < num_nodes:
+                n += 1
+            return n
+
+        def _cayley_graph_size(self, n):
+            n = int(n)
+            return round(n * n * n * np.prod([1 - 1.0 / (p * p) for p in list(set(primefac(n)))]))
+
+        # Get the Cayley graph and truncate the graph to align with the input graph's number of nodes
+        def _get_egp_edge_index(self, cayley_n, num_nodes):
+            # Determine if the graph is already in memory
+            if cayley_n not in self.cayley_memory:
+                self.cayley_memory[cayley_n] = get_cayley_graph(cayley_n)
+
+            cayley_graph_edge_index = self.cayley_memory[cayley_n].clone()
+
+            if num_nodes not in self.cayley_node_memory:
+                truncated_edge_index = cayley_graph_edge_index[:,
+                                       torch.logical_and(cayley_graph_edge_index[0] < num_nodes,
+                                                         cayley_graph_edge_index[1] < num_nodes)]
+                self.cayley_node_memory[num_nodes] = truncated_edge_index
+
+            edge_index = self.cayley_node_memory[num_nodes].clone()
+
+            return edge_index
+
+        # Get the complete Cayley graph structure
+        def _get_cgp_edge_index(self, cayley_n):
+            cayley_num_nodes = self._cayley_graph_size(cayley_n)
+            if cayley_n not in self.cayley_memory:
+                edge_index = get_cayley_graph(cayley_n)
+                self.cayley_memory[cayley_n] = edge_index
+
+            edge_index = self.cayley_memory[cayley_n].clone()
+
+            return edge_index, cayley_num_nodes
+
     def addports(data):
         data.ports = torch.zeros(data.num_edges, 1)
         degs = degree(
@@ -424,6 +548,11 @@ def get_dataset(name, device):
         if args.pse == "RDPE":
             pre_transform = T.Compose([makefeatures, addports, RDPE])
             args.added_dimensions = 0
+    elif args.augmentation == 'rewiring':
+        name = args.rewire
+        if args.rewire == "CGP":
+            pre_transform = T.Compose([makefeatures, addports, ExpanderTransform("CGP")])
+            args.added_dimensions = len(ksteps)
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -633,6 +762,12 @@ def get_model(args, num_nodes, num_features, device):
                         [x_shuffle, x_rest],
                         dim=2,
                     )
+            elif args.augmentation == "rewiring":
+                if args.rewire == "CGP":
+                    x_embeddings = torch.zeros((x.shape[0], x.shape[1]),
+                                               device=x.device)  # Here, we just set the embeddings to zero
+                    x_embeddings[~data.virtual_node_mask] = x[~data.virtual_node_mask]
+                    x = x_embeddings
 
             outs = [x]
             x = x.view(-1, x.size(-1))
@@ -642,6 +777,9 @@ def get_model(args, num_nodes, num_features, device):
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
+                elif args.augmentation == "rewiring":
+                    if args.rewire == "CGP" and i % 2 == 1:
+                        x = self.convs[i](x, data.expander_edge_index)
                 else:
                     x = self.convs[i](x, run_edge_index)
                 x = self.bns[i](x)
