@@ -57,9 +57,9 @@ OUTPUT_DIM = 16
 EPSILON_MATRIX = 1e-7
 EPSILON_CMP = 1e-6
 SAMPLE_NUM = 600
-EPOCH = 50
+EPOCH = 100
 MARGIN = 0.0
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 1e-4
 THRESHOLD = 120.12 # with 0.995 (0.995^10 > 0.95) original 72.34
 BATCH_SIZE = 16
 WEIGHT_DECAY = 1e-5
@@ -135,13 +135,13 @@ parser.add_argument(
 )
 parser.add_argument("--name_tag", type=str, default=None)
 parser.add_argument("--prob", type=int, default=-1)
-parser.add_argument("--num_runs", type=int, default=50)
+parser.add_argument("--num_runs", type=int, default=1)
 parser.add_argument(
-    "--num_layers", type=int, default=4
+    "--num_layers", type=int, default=10
 )  # 9 layers were used for skipcircles dataset
 parser.add_argument("--use_aux_loss", action="store_true", default=False, help='Not Supported Now!')
-parser.add_argument("--hidden_units", type=int, default=32)
-parser.add_argument("--added_dimensions", type=int, default=1)
+parser.add_argument("--hidden_units", type=int, default=16)
+parser.add_argument("--added_dimensions", type=int, default=0)
 parser.add_argument("--logging", type=str, default="default.log")
 parser.add_argument("--root", type=str, default=".")
 # General settings.
@@ -764,9 +764,9 @@ def get_model(args, num_nodes, num_features, device):
                     )
             elif args.augmentation == "rewiring":
                 if args.rewire == "CGP":
-                    x_embeddings = torch.zeros((x.shape[0], x.shape[1]),
+                    x_embeddings = torch.zeros((x.shape[0], x.shape[1], x.shape[2]),
                                                device=x.device)  # Here, we just set the embeddings to zero
-                    x_embeddings[~data.virtual_node_mask] = x[~data.virtual_node_mask]
+                    x_embeddings[:,~data.virtual_node_mask] = x[:,~data.virtual_node_mask]
                     x = x_embeddings
 
             outs = [x]
@@ -774,12 +774,26 @@ def get_model(args, num_nodes, num_features, device):
             run_edge_index = edge_index.repeat(1, num_runs) + torch.arange(
                 num_runs, device=edge_index.device
             ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
+            if args.augmentation == "rewiring" and args.rewire == "CGP":
+                num_nodess = scatter(data.batch.new_ones(x.size(0)), data.batch, dim=0, reduce='sum')
+                ptr = cumsum(num_nodess)
+                node_perm = torch.cat([
+                    torch.randperm(n, device=x.device) + offset
+                    for offset, n in zip(ptr[:-1], num_nodess)
+                ])
+
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
                 elif args.augmentation == "rewiring":
-                    if args.rewire == "CGP" and i % 2 == 1:
-                        x = self.convs[i](x, data.expander_edge_index)
+                    if args.rewire == "CGP":
+                        if i % 2 == 1:
+                            x = x[node_perm]
+                            x = self.convs[i](x, data.expander_edge_index)
+                            x[node_perm] = torch.clone(x)
+                        else:
+                            x = self.convs[i](x, run_edge_index)
+
                 else:
                     x = self.convs[i](x, run_edge_index)
                 x = self.bns[i](x)
