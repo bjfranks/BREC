@@ -547,7 +547,7 @@ def get_dataset(name, device):
             args.added_dimensions = minlength
         if args.pse == "RDPE":
             pre_transform = T.Compose([makefeatures, addports, RDPE])
-            args.added_dimensions = 0
+            args.added_dimensions = maxlength
     elif args.augmentation == 'rewiring':
         name = args.rewire
         if args.rewire == "CGP":
