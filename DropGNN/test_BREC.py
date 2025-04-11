@@ -969,12 +969,9 @@ def evaluation(dataset, device, args):
             #Y/=big
             D = X - Y
             if log_flag:
-                logger.info(f"X = {X}")
                 logger.info(f"X_mean = {torch.mean(X, dim=1)}")
-                logger.info(f"Y = {Y}")
                 logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
-                logger.info(f"D = {D}")
-            D = torch.where(torch.abs(D) < torch.abs(X)/1000, 0, D) # Avoids floating point subtraction errors for similar embeddings
+            D = torch.where(torch.abs(D) < torch.maximum(torch.abs(X), torch.abs(Y))/100, 0, D) # Avoids false positives
             if log_flag:
                 logger.info(f"newD = {D}")
             D_mean = torch.mean(D, dim=1).reshape(-1, 1)
