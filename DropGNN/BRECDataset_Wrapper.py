@@ -61,12 +61,14 @@ class BRECDataset(InMemoryDataset):
         value = original
         # Original typical BREC graphs
         if (type(item) is slice and item.start < original and item.stop-1 <original) or (type(item) is int and item < original):
+            #print("Original")
             return self.BRECs[0][item]
 
         # Added in CCoHG graphs
         old = value
         value = value+CCoHG
         if (type(item) is slice and item.start < value and item.stop-1 < value) or (type(item) is int and item < value):
+            #print("CCoHG")
             return self.BRECs[1][slice(item.start-old, item.stop-old, item.step)]
 
         # Added in 3r2r graphs
@@ -74,6 +76,7 @@ class BRECDataset(InMemoryDataset):
         value = value + _3r2r
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("3r2r")
             return self.BRECs[2][slice(item.start - old, item.stop - old, item.step)]
 
         # Added in pep graphs
@@ -81,12 +84,14 @@ class BRECDataset(InMemoryDataset):
         value = value + pep
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("pep")
             return self.BRECs[3][slice(item.start - old, item.stop - old, item.step)]
 
         # Original random BREC graphs at the end
         value = value + original
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("Original")
             return self.BRECs[0][slice(item.start-CCoHG-_3r2r-pep,
                                        item.stop-CCoHG-_3r2r-pep, item.step)]
 
@@ -94,6 +99,7 @@ class BRECDataset(InMemoryDataset):
         value = value + CCoHG
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("CCoHG")
             return self.BRECs[1][slice(item.start-(2*original)-_3r2r-pep,
                                        item.stop-(2*original)-_3r2r-pep, item.step)]
 
@@ -101,6 +107,7 @@ class BRECDataset(InMemoryDataset):
         value = value + _3r2r
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("3r2r")
             return self.BRECs[2][slice(item.start - (2 * original) - (2*CCoHG) -pep,
                                        item.stop - (2 * original) - (2*CCoHG) -pep, item.step)]
 
@@ -108,6 +115,7 @@ class BRECDataset(InMemoryDataset):
         value = value + pep
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
+            #print("pep")
             return self.BRECs[3][slice(item.start - (2 * original) - (2 * CCoHG) - (2 * _3r2r),
                                        item.stop - (2 * original) - (2 * CCoHG) - (2 * _3r2r), item.step)]
 

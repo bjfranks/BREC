@@ -44,7 +44,7 @@ class BRECDataset(InMemoryDataset):
         self.name = name
         super().__init__(root, transform, pre_transform, pre_filter)
 
-        path = self.processed_paths[['original', 'CCoHG', '3r2r'].index(split)]
+        path = self.processed_paths[['original', 'CCoHG', '3r2r', 'pep'].index(split)]
         self.data, self.slices = torch.load(path)
 
     @property
