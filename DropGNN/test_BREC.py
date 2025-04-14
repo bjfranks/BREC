@@ -82,7 +82,7 @@ part_dict = {
     "Distance_Regular": (380, 400),
     "CCoHG": (400, 500),
     "3r2r": (500, 600),
-    "pep": (500, 600),
+    "pep": (600, 700),
 }
 parser = argparse.ArgumentParser(description="BREC Test")
 
