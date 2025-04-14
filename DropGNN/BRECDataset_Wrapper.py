@@ -38,7 +38,13 @@ class BRECDataset(InMemoryDataset):
                                                  transform=transform,
                                                  pre_transform=pre_transform,
                                                  pre_filter=pre_filter,
-                                                 split="3r2r")
+                                                 split="3r2r"),
+                      BRECDataset_v4.BRECDataset(name=name,
+                                                 root=root,
+                                                 transform=transform,
+                                                 pre_transform=pre_transform,
+                                                 pre_filter=pre_filter,
+                                                 split="pep")
                       ]
 
     def __len__(self):
@@ -50,13 +56,14 @@ class BRECDataset(InMemoryDataset):
         original = 25600
         CCoHG = 6400
         _3r2r = 6400
+        pep = 6400
 
         value = original
-        #Original typical BREC graphs
+        # Original typical BREC graphs
         if (type(item) is slice and item.start < original and item.stop-1 <original) or (type(item) is int and item < original):
             return self.BRECs[0][item]
 
-        #Added in CCoHG graphs
+        # Added in CCoHG graphs
         old = value
         value = value+CCoHG
         if (type(item) is slice and item.start < value and item.stop-1 < value) or (type(item) is int and item < value):
@@ -69,18 +76,40 @@ class BRECDataset(InMemoryDataset):
                 type(item) is int and item < value):
             return self.BRECs[2][slice(item.start - old, item.stop - old, item.step)]
 
-        #Original random BREC graphs at the end
+        # Added in pep graphs
+        old = value
+        value = value + pep
+        if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
+                type(item) is int and item < value):
+            return self.BRECs[3][slice(item.start - old, item.stop - old, item.step)]
+
+        # Original random BREC graphs at the end
         value = value + original
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
-            return self.BRECs[0][slice(item.start-CCoHG-_3r2r, item.stop-CCoHG-_3r2r, item.step)]
+            return self.BRECs[0][slice(item.start-CCoHG-_3r2r-pep,
+                                       item.stop-CCoHG-_3r2r-pep, item.step)]
 
         # CCoHG graphs at the end
         value = value + CCoHG
         if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
                 type(item) is int and item < value):
-            return self.BRECs[1][slice(item.start-(2*original)-_3r2r, item.stop-(2*original)-_3r2r, item.step)]
-        return self.BRECs[2][slice(item.start-(2*25600)-(2*CCoHG), item.stop-(2*25600)-(2*CCoHG), item.step)]
+            return self.BRECs[1][slice(item.start-(2*original)-_3r2r-pep,
+                                       item.stop-(2*original)-_3r2r-pep, item.step)]
+
+        # 3r2r graphs at the end
+        value = value + _3r2r
+        if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
+                type(item) is int and item < value):
+            return self.BRECs[2][slice(item.start - (2 * original) - (2*CCoHG) -pep,
+                                       item.stop - (2 * original) - (2*CCoHG) -pep, item.step)]
+
+        # pep graphs at the end
+        value = value + pep
+        if (type(item) is slice and item.start < value and item.stop - 1 < value) or (
+                type(item) is int and item < value):
+            return self.BRECs[3][slice(item.start - (2 * original) - (2 * CCoHG) - (2 * _3r2r),
+                                       item.stop - (2 * original) - (2 * CCoHG) - (2 * _3r2r), item.step)]
 
 
 def main():

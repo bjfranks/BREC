@@ -56,7 +56,7 @@ P_NORM = 2
 OUTPUT_DIM = 16
 EPSILON_MATRIX = 1e-7
 EPSILON_CMP = 1e-6
-SAMPLE_NUM = 600
+SAMPLE_NUM = 700
 EPOCH = 100
 MARGIN = 0.0
 LEARNING_RATE = 1e-4
@@ -82,6 +82,7 @@ part_dict = {
     "Distance_Regular": (380, 400),
     "CCoHG": (400, 500),
     "3r2r": (500, 600),
+    "pep": (500, 600),
 }
 parser = argparse.ArgumentParser(description="BREC Test")
 
@@ -233,7 +234,7 @@ def get_dataset(name, device):
         ).unsqueeze(1)
         return data
 
-    ksteps = list(range(2, 22))
+    ksteps = list(range(2, 10))
     def RWSE(data):
         # from get_rw_landing_probs in GPSE/graphym/transform/posenc_stats.py
         space_dim = 0
@@ -301,7 +302,7 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, green_encoding], dim=1)
         return data
 
-    kernel_times = list(range(1, 21))
+    kernel_times = list(range(1, 10))
     def HKdiagSE(data):
         # from get_heat_kernels_diag in GPSE/graphym/transform/posenc_stats.py
 

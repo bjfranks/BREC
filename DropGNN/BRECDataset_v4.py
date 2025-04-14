@@ -54,11 +54,11 @@ class BRECDataset(InMemoryDataset):
 
     @property
     def raw_file_names(self):
-        return ["brec_v3.npy", "brec_CCoHG.graphml", "brec_3r2r.graphml"]
+        return ["brec_v3.npy", "brec_CCoHG.graphml", "brec_3r2r.graphml", "brec_pep.graphml"]
 
     @property
     def processed_file_names(self):
-        return ["brec_v3.pt", "brec_CCoHG.pt", "brec_3r2r.pt"]
+        return ["brec_v3.pt", "brec_CCoHG.pt", "brec_3r2r.pt", "brec_pep.pt"]
 
     def process(self):
 
@@ -95,6 +95,17 @@ class BRECDataset(InMemoryDataset):
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[2])
+
+        data_list = load_graphml(self.raw_paths[3])
+
+        if self.pre_filter is not None:
+            data_list = [data for data in data_list if self.pre_filter(data)]
+
+        if self.pre_transform is not None:
+            data_list = [self.pre_transform(data) for data in tqdm(data_list)]
+
+        data, slices = self.collate(data_list)
+        torch.save((data, slices), self.processed_paths[3])
 
 
 def main():
