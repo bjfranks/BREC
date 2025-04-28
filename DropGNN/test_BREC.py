@@ -429,6 +429,7 @@ def get_dataset(name, device):
         res_matrix[:, :l] = g_resistance_matrix[:, :l]
         res_matrix = torch.from_numpy(res_matrix)
         res_matrix, _ = torch.sort(res_matrix, descending=True)
+        res_matrix = torch.round(res_matrix, decimals=5)
         data.x = torch.cat([data.x, res_matrix], dim=1)
         return data
 
