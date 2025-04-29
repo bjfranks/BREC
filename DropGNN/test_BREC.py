@@ -424,11 +424,11 @@ def get_dataset(name, device):
         if g_resistance_matrix.max() > N - 1:
             print(f'error: {g_resistance_matrix}')
         g_resistance_matrix[g_resistance_matrix == -1.0] = 512.0
-        res_matrix = np.zeros((N, maxlength), dtype=np.float32)
+        res_matrix = torch.zeros((N, maxlength), dtype=torch.float32)
         l = min(maxlength, N)
+        g_resistance_matrix = torch.from_numpy(g_resistance_matrix)
+        g_resistance_matrix, _ = torch.sort(g_resistance_matrix, descending=True)
         res_matrix[:, :l] = g_resistance_matrix[:, :l]
-        res_matrix = torch.from_numpy(res_matrix)
-        res_matrix, _ = torch.sort(res_matrix, descending=True)
         res_matrix = torch.round(res_matrix, decimals=5)
         data.x = torch.cat([data.x, res_matrix], dim=1)
         return data
@@ -969,6 +969,7 @@ def evaluation(dataset, device, args):
             #X/=big
             #Y/=big
             D = X - Y
+            #print(D)
             if log_flag:
                 logger.info(f"X_mean = {torch.mean(X, dim=1)}")
                 logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
@@ -1162,6 +1163,8 @@ def main():
 
     pre_calculation()
     dataset = get_dataset(name="no_param", device=device)
+    #torch.set_printoptions(precision=7)
+    #print([point.x for point in dataset[25600+6300:25600+6400]])
     # model = get_model(args, device)
     evaluation(dataset, device, args)
 
