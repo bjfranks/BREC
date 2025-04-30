@@ -96,17 +96,6 @@ class BRECDataset(InMemoryDataset):
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[2])
 
-        data_list = load_graphml(self.raw_paths[3])
-
-        if self.pre_filter is not None:
-            data_list = [data for data in data_list if self.pre_filter(data)]
-
-        if self.pre_transform is not None:
-            data_list = [self.pre_transform(data) for data in tqdm(data_list)]
-
-        data, slices = self.collate(data_list)
-        torch.save((data, slices), self.processed_paths[3])
-
 
 def main():
     dataset = BRECDataset()
