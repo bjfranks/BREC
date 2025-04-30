@@ -508,6 +508,9 @@ def get_dataset(name, device):
 
             return edge_index, cayley_num_nodes
 
+    def non_edge_index(data):
+        pass
+
     def addports(data):
         data.ports = torch.zeros(data.num_edges, 1)
         degs = degree(
@@ -554,6 +557,9 @@ def get_dataset(name, device):
         if args.rewire == "CGP":
             pre_transform = T.Compose([makefeatures, addports, ExpanderTransform("CGP")])
             args.added_dimensions = len(ksteps)
+        if args.rewire == "AE" or args.rewire == "DE":
+            pre_transform = T.Compose([makefeatures, addports])
+            name = "no_param"
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -770,30 +776,39 @@ def get_model(args, num_nodes, num_features, device):
                     x_embeddings[:,~data.virtual_node_mask] = x[:,~data.virtual_node_mask]
                     x = x_embeddings
 
+
             outs = [x]
             x = x.view(-1, x.size(-1))
             run_edge_index = edge_index.repeat(1, num_runs) + torch.arange(
                 num_runs, device=edge_index.device
             ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
-            if args.augmentation == "rewiring" and args.rewire == "CGP":
-                num_nodess = scatter(data.batch.new_ones(x.size(0)), data.batch, dim=0, reduce='sum')
-                ptr = cumsum(num_nodess)
-                node_perm = torch.cat([
-                    torch.randperm(n, device=x.device) + offset
-                    for offset, n in zip(ptr[:-1], num_nodess)
-                ])
+            if args.augmentation == "rewiring":
+                if args.rewire == "CGP":
+                    num_nodess = scatter(data.batch.new_ones(x.size(0)), torch.cat([data.batch+(i*(max(data.batch)+1)) for i in range(num_runs)]), dim=0, reduce='sum')
+                    ptr = cumsum(num_nodess)
+                    node_perm = torch.cat([
+                        torch.randperm(n, device=x.device) + offset
+                        for offset, n in zip(ptr[:-1], num_nodess)
+                    ])
+                if args.rewire == "DE":
+                    run_edge_index, _ = dropout_edge(run_edge_index, force_undirected=True, p=0.1)
+                if args.rewire == "AE":
+                    print(len(run_edge_index[0]), max(batch)+1)
+                    run_edge_index = torch.cat((run_edge_index,
+                                                batched_negative_sampling(run_edge_index, batch, force_undirected=True,
+                                                num_neg_samples=int(0.1*0.5*len(run_edge_index[0])/(max(batch)+1)))),
+                                               1)
 
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
-                elif args.augmentation == "rewiring":
-                    if args.rewire == "CGP":
-                        if i % 2 == 1:
-                            x = x[node_perm]
-                            x = self.convs[i](x, data.expander_edge_index)
-                            x[node_perm] = torch.clone(x)
-                        else:
-                            x = self.convs[i](x, run_edge_index)
+                elif args.augmentation == "rewiring" and args.rewire == "CGP":
+                    if i % 2 == 1:
+                        x = x[node_perm]
+                        x = self.convs[i](x, data.expander_edge_index)
+                        x[node_perm] = torch.clone(x)
+                    else:
+                        x = self.convs[i](x, run_edge_index)
 
                 else:
                     x = self.convs[i](x, run_edge_index)
@@ -969,7 +984,7 @@ def evaluation(dataset, device, args):
             #X/=big
             #Y/=big
             D = X - Y
-            #print(D)
+            #nanprint(D)
             if log_flag:
                 logger.info(f"X_mean = {torch.mean(X, dim=1)}")
                 logger.info(f"Y_mean = {torch.mean(Y, dim=1)}")
