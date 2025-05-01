@@ -338,7 +338,7 @@ def get_dataset(name, device):
         data.x = torch.cat([data.x, heat_kernels_diag], dim=1)
         return data
 
-    k_list = list(range(2, 6))#9
+    k_list = list(range(2, 6))
     def CycleSE(data):
         graph = to_networkx(data)
         cycles = list(nx.simple_cycles(graph, length_bound=max(k_list)))
@@ -354,7 +354,7 @@ def get_dataset(name, device):
         cycles_len = len(cycles)
         for i, k in enumerate(k_list):
             min_i = next((x for x in range(cycles_len) if len(cycles[x])==k), 0)
-            max_i = next((x for x in reversed(range(cycles_len)) if len(cycles[x])==k), 0)
+            max_i = next((x for x in reversed(range(cycles_len)) if len(cycles[x])==k), -1)
             for node, count in Counter(itertools.chain.from_iterable(cycles[min_i:max_i+1])).items():
                 x[node, i] = count/2
 
@@ -546,6 +546,7 @@ def get_dataset(name, device):
         if args.pse == "LapPE" or args.pse == "RLapPE":
             pre_transform = T.Compose([makefeatures, addports, LapPE])
             args.added_dimensions = frequencies
+            name = "LapPE"
         if args.pse == "SPDPE":#RDPE
             pre_transform = T.Compose([makefeatures, addports, SPDPE])
             args.added_dimensions = minlength
@@ -756,12 +757,13 @@ def get_model(args, num_nodes, num_features, device):
                 if args.pse == 'RLapPE':
                     x_shuffle = x[:, :, -args.added_dimensions:]
                     count = torch.bincount(data.batch)
-                    x_shuffle = x_shuffle[:,
-                                torch.cat([torch.randperm(i, device=x.device)+j
-                                           for i, j in zip(count, torch.cat([torch.zeros(1, device=x.device,
-                                                                                         dtype=torch.int),
-                                                                             torch.cumsum(count, 0)[:-1]]))]),
-                                :]
+                    for k in range(x_shuffle.shape[0]):
+                        x_shuffle[k] = x_shuffle[k,
+                                    torch.cat([torch.randperm(i, device=x.device)+j
+                                               for i, j in zip(count, torch.cat([torch.zeros(1, device=x.device,
+                                                                                             dtype=torch.int),
+                                                                                 torch.cumsum(count, 0)[:-1]]))]),
+                                    :]
                     signflips = 2*torch.randint(2, (x.size(0), x.size(1), 1), device=x.device)-1
                     x_shuffle = x_shuffle*signflips
                     x_rest = x[:, :, :-args.added_dimensions]
@@ -793,10 +795,13 @@ def get_model(args, num_nodes, num_features, device):
                 if args.rewire == "DE":
                     run_edge_index, _ = dropout_edge(run_edge_index, force_undirected=True, p=0.1)
                 if args.rewire == "AE":
-                    print(len(run_edge_index[0]), max(batch)+1)
+                    run_batch = torch.cat([data.batch+(i*(max(data.batch)+1)) for i in range(num_runs)])
                     run_edge_index = torch.cat((run_edge_index,
-                                                batched_negative_sampling(run_edge_index, batch, force_undirected=True,
-                                                num_neg_samples=int(0.1*0.5*len(run_edge_index[0])/(max(batch)+1)))),
+                                                batched_negative_sampling(run_edge_index, run_batch,
+                                                                          force_undirected=True,
+                                                                          num_neg_samples=2*min(int(0.1*0.5*
+                                                                                              len(run_edge_index[0])/
+                                                                                              (max(run_batch)+1)),1))),
                                                1)
 
             for i in range(self.num_layers):
