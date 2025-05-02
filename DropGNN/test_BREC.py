@@ -285,7 +285,7 @@ def get_dataset(name, device):
         evals, evecs = torch.linalg.eigh(L)
         offset = (evals < EPS).sum().item()
         if offset == data.num_nodes:
-            return torch.zeros(data.num_nodes, 7, dtype=torch.float32)
+            return torch.cat([data.x, torch.zeros(data.num_nodes, 7, dtype=torch.float32)], dim=1)
 
         electrostatic = evecs[:, offset:] / evals[offset:] @ evecs[:, offset:].T
         electrostatic = electrostatic - electrostatic.diag()
@@ -534,10 +534,10 @@ def get_dataset(name, device):
         if args.pse == "RWSE":
             pre_transform = T.Compose([makefeatures, addports, RWSE])
             args.added_dimensions = len(ksteps)
-        if args.pse == "ElstaticPE":
+        if args.pse == "ElstaticPE"or args.pse == "RElstaticPE":
             pre_transform = T.Compose([makefeatures, addports, ElstaticPE])
             args.added_dimensions = 7
-        if args.pse == "HKdiagSE":
+        if args.pse == "HKdiagSE" or args.pse == "RHKdiagSE":
             pre_transform = T.Compose([makefeatures, addports, HKdiagSE])
             args.added_dimensions = len(kernel_times)
         if args.pse == "CycleSE":
@@ -754,7 +754,7 @@ def get_model(args, num_nodes, num_features, device):
 
                     return x_out
             elif args.augmentation == "PSE":
-                if args.pse == 'RLapPE':
+                if args.pse == 'RLapPE' or args.pse == 'RHKdiagSE' or args.pse == 'RElstaticPE':
                     x_shuffle = x[:, :, -args.added_dimensions:]
                     count = torch.bincount(data.batch)
                     for k in range(x_shuffle.shape[0]):
@@ -764,8 +764,9 @@ def get_model(args, num_nodes, num_features, device):
                                                                                              dtype=torch.int),
                                                                                  torch.cumsum(count, 0)[:-1]]))]),
                                     :]
-                    signflips = 2*torch.randint(2, (x.size(0), x.size(1), 1), device=x.device)-1
-                    x_shuffle = x_shuffle*signflips
+                    if args.pse == 'RLapPE' :
+                        signflips = 2*torch.randint(2, (x.size(0), x.size(1), 1), device=x.device)-1
+                        x_shuffle = x_shuffle*signflips
                     x_rest = x[:, :, :-args.added_dimensions]
                     x = torch.cat(
                         [x_shuffle, x_rest],
