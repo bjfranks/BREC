@@ -555,8 +555,8 @@ def get_dataset(name, device):
             args.added_dimensions = maxlength
     elif args.augmentation == 'rewiring':
         name = args.rewire
-        if args.rewire == "CGP":
-            pre_transform = T.Compose([makefeatures, addports, ExpanderTransform("CGP")])
+        if args.rewire == "CGP" or args.rewire == "EGP":
+            pre_transform = T.Compose([makefeatures, addports, ExpanderTransform(args.rewire)])
             args.added_dimensions = len(ksteps)
         if args.rewire == "AE" or args.rewire == "DE":
             pre_transform = T.Compose([makefeatures, addports])
@@ -785,7 +785,7 @@ def get_model(args, num_nodes, num_features, device):
                 num_runs, device=edge_index.device
             ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
             if args.augmentation == "rewiring":
-                if args.rewire == "CGP":
+                if args.rewire == "CGP" or args.rewire == "EGP":
                     num_nodess = scatter(data.batch.new_ones(x.size(0)), torch.cat([data.batch+(i*(max(data.batch)+1)) for i in range(num_runs)]), dim=0, reduce='sum')
                     ptr = cumsum(num_nodess)
                     node_perm = torch.cat([
@@ -807,7 +807,7 @@ def get_model(args, num_nodes, num_features, device):
             for i in range(self.num_layers):
                 if args.augmentation == "ports":
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
-                elif args.augmentation == "rewiring" and args.rewire == "CGP":
+                elif args.augmentation == "rewiring" and (args.rewire == "CGP" or args.rewire == "EGP"):
                     if i % 2 == 1:
                         x = x[node_perm]
                         x = self.convs[i](x, data.expander_edge_index)
