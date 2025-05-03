@@ -534,19 +534,21 @@ def get_dataset(name, device):
         if args.pse == "RWSE":
             pre_transform = T.Compose([makefeatures, addports, RWSE])
             args.added_dimensions = len(ksteps)
-        if args.pse == "ElstaticPE"or args.pse == "RElstaticPE":
+        if args.pse == "ElstaticPE" or args.pse == "RElstaticPE":
+            name = "ElstaticPE"
             pre_transform = T.Compose([makefeatures, addports, ElstaticPE])
             args.added_dimensions = 7
         if args.pse == "HKdiagSE" or args.pse == "RHKdiagSE":
+            name = "HKdiagSE"
             pre_transform = T.Compose([makefeatures, addports, HKdiagSE])
             args.added_dimensions = len(kernel_times)
         if args.pse == "CycleSE":
             pre_transform = T.Compose([makefeatures, addports, CycleSE])
             args.added_dimensions = len(k_list)
         if args.pse == "LapPE" or args.pse == "RLapPE":
+            name = "LapPE"
             pre_transform = T.Compose([makefeatures, addports, LapPE])
             args.added_dimensions = frequencies
-            name = "LapPE"
         if args.pse == "SPDPE":#RDPE
             pre_transform = T.Compose([makefeatures, addports, SPDPE])
             args.added_dimensions = minlength
