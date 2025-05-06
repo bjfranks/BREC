@@ -537,7 +537,7 @@ def get_dataset(name, device):
         if args.pse == "ElstaticPE" or args.pse == "RElstaticPE":
             name = "ElstaticPE"
             pre_transform = T.Compose([makefeatures, addports, ElstaticPE])
-            args.added_dimensions = 7
+            args.added_dimensions = 5
         if args.pse == "HKdiagSE" or args.pse == "RHKdiagSE":
             name = "HKdiagSE"
             pre_transform = T.Compose([makefeatures, addports, HKdiagSE])
