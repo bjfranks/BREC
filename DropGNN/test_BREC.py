@@ -275,12 +275,12 @@ def get_dataset(name, device):
             *get_laplacian(data.edge_index, normalization=None, num_nodes=data.num_nodes)
         ).todense()
         L = torch.as_tensor(L)
-        tmp = (L.diag() ** -1)
-        tmp = torch.where(tmp < torch.inf, tmp, 0)
-        Dinv = torch.eye(L.shape[0]) * tmp
-        A = deepcopy(L).abs()
-        A.fill_diagonal_(0)
-        DinvA = Dinv.matmul(A)
+        # tmp = (L.diag() ** -1)
+        # tmp = torch.where(tmp < torch.inf, tmp, 0)
+        # Dinv = torch.eye(L.shape[0]) * tmp
+        # A = deepcopy(L).abs()
+        # A.fill_diagonal_(0)
+        # DinvA = Dinv.matmul(A)
 
         evals, evecs = torch.linalg.eigh(L)
         offset = (evals < EPS).sum().item()
@@ -295,8 +295,8 @@ def get_dataset(name, device):
             electrostatic.std(dim=0),  # Std of Vi -> j
             electrostatic.min(dim=1)[0],  # Min of Vj -> i
             electrostatic.std(dim=1),  # Std of Vj -> i
-            (DinvA * electrostatic).sum(dim=0),  # Mean of interaction on direct neighbour
-            (DinvA * electrostatic).sum(dim=1),  # Mean of interaction from direct neighbour
+            #(DinvA * electrostatic).sum(dim=0),  # Mean of interaction on direct neighbour
+            #(DinvA * electrostatic).sum(dim=1),  # Mean of interaction from direct neighbour
         ], dim=1)
         data.x = torch.cat([data.x, green_encoding], dim=1)
         return data
@@ -559,10 +559,8 @@ def get_dataset(name, device):
         name = args.rewire
         if args.rewire == "CGP" or args.rewire == "EGP":
             pre_transform = T.Compose([makefeatures, addports, ExpanderTransform(args.rewire)])
-            args.added_dimensions = len(ksteps)
         if args.rewire == "AE" or args.rewire == "DE":
             pre_transform = T.Compose([makefeatures, addports])
-            name = "no_param"
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
