@@ -561,6 +561,7 @@ def get_dataset(name, device):
             pre_transform = T.Compose([makefeatures, addports, ExpanderTransform(args.rewire)])
         if args.rewire == "AE" or args.rewire == "DE":
             pre_transform = T.Compose([makefeatures, addports])
+            name="no_param"
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
