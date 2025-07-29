@@ -112,13 +112,13 @@ parser.add_argument(
     "--pse",
     type=str,
     default="RWSE",
-    help="Options are ['RWSE', 'ElstaticPE', 'HKdiagSE', 'CycleSE', 'LapPE', 'RLapPE']",#TODO
+    help="Options are ['RWSE', 'ElstaticPE', 'EElstaticPE', 'HKdiagSE', 'RHKdiagSE', 'CycleSE', 'LapPE', 'RLapPE']",#TODO
 )
 parser.add_argument(
     "--rewire",
     type=str,
     default="CGP",
-    help="Options are ['CGP']",#TODO
+    help="Options are ['CGP', 'RCGP', 'EGP', 'REGP']",#TODO
 )
 parser.add_argument(
     "--loss",
@@ -356,7 +356,7 @@ def get_dataset(name, device):
             min_i = next((x for x in range(cycles_len) if len(cycles[x])==k), 0)
             max_i = next((x for x in reversed(range(cycles_len)) if len(cycles[x])==k), -1)
             for node, count in Counter(itertools.chain.from_iterable(cycles[min_i:max_i+1])).items():
-                x[node, i] = count/2
+                x[node, i] = count
 
         #x[ : , 1: ] /= 2
         data.x = torch.cat([data.x, x], dim=1)
@@ -557,7 +557,7 @@ def get_dataset(name, device):
             args.added_dimensions = maxlength
     elif args.augmentation == 'rewiring':
         name = args.rewire
-        if args.rewire == "CGP" or args.rewire == "EGP":
+        if args.rewire == "CGP" or args.rewire == "RCGP" or args.rewire == "EGP" or args.rewire == "REGP":
             pre_transform = T.Compose([makefeatures, addports, ExpanderTransform(args.rewire)])
         if args.rewire == "AE" or args.rewire == "DE":
             pre_transform = T.Compose([makefeatures, addports])
@@ -787,7 +787,7 @@ def get_model(args, num_nodes, num_features, device):
                 num_runs, device=edge_index.device
             ).repeat_interleave(edge_index.size(1)) * (edge_index.max() + 1)
             if args.augmentation == "rewiring":
-                if args.rewire == "CGP" or args.rewire == "EGP":
+                if args.rewire == "RCGP" or args.rewire == "REGP":
                     num_nodess = scatter(data.batch.new_ones(x.size(0)), torch.cat([data.batch+(i*(max(data.batch)+1)) for i in range(num_runs)]), dim=0, reduce='sum')
                     ptr = cumsum(num_nodess)
                     node_perm = torch.cat([
@@ -811,9 +811,11 @@ def get_model(args, num_nodes, num_features, device):
                     x = self.convs[i](x, run_edge_index, data.ports.expand(-1, x.size(-1)))
                 elif args.augmentation == "rewiring" and (args.rewire == "CGP" or args.rewire == "EGP"):
                     if i % 2 == 1:
-                        x = x[node_perm]
+                        if args.rewire == "RCGP" or args.rewire == "REGP":
+                            x = x[node_perm]
                         x = self.convs[i](x, data.expander_edge_index)
-                        x[node_perm] = torch.clone(x)
+                        if args.rewire == "RCGP" or args.rewire == "REGP":
+                            x[node_perm] = torch.clone(x)
                     else:
                         x = self.convs[i](x, run_edge_index)
 
