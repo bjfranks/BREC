@@ -559,9 +559,13 @@ def get_dataset(name, device):
         name = args.rewire
         if args.rewire == "CGP" or args.rewire == "RCGP" or args.rewire == "EGP" or args.rewire == "REGP":
             pre_transform = T.Compose([makefeatures, addports, ExpanderTransform(args.rewire)])
+        if args.rewire == "RCGP":
+            name = "CGP"
+        if args.rewire == "REGP":
+            name = "EGP"
         if args.rewire == "AE" or args.rewire == "DE":
             pre_transform = T.Compose([makefeatures, addports])
-            name="no_param"
+            name = "no_param"
     else:
         pre_transform = T.Compose([makefeatures, addports])
 
@@ -1039,6 +1043,7 @@ def evaluation(dataset, device, args):
 
         for id in tqdm(range(part_range[0], part_range[1])):
             logger.info(f"ID: {id}")
+            time_start = time.process_time()
             for test_count in range(10):
                 dataset_traintest = dataset[
                     id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
@@ -1120,6 +1125,8 @@ def evaluation(dataset, device, args):
                 if (T_square_traintest > THRESHOLD and T_square_reliability < THRESHOLD
                         and not torch.isclose(T_square_traintest, T_square_reliability, atol=EPSILON_CMP)):
                     break
+            time_end = time.process_time()
+            time_cost = round(time_end - time_start, 2)
 
             isomorphic_flag = False
             reliability_flag = False
@@ -1143,7 +1150,8 @@ def evaluation(dataset, device, args):
             #print(isomorphic_flag, reliability_flag, T_square_traintest, T_square_reliability)
 
             #save to file here
-            store.append((part_name, id, isomorphic_flag, T_square_traintest, reliability_flag, T_square_reliability, test_count))
+            store.append((part_name, id, isomorphic_flag, T_square_traintest, reliability_flag, T_square_reliability,
+                          test_count, time_cost))
 
         end = time.process_time()
         time_cost_part = round(end - start, 2)
@@ -1178,6 +1186,7 @@ def evaluation(dataset, device, args):
         f"{cnt-fail_in_reliability}\t{cnt}\t{fail_in_reliability}\t{args.num_layers}\t{args.hidden_units}\t{args.num_runs}\t{OUTPUT_DIM}\t{BATCH_SIZE}\t{LEARNING_RATE}\t{WEIGHT_DECAY}\t{SEED}"
     )
 
+
 def main():
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
@@ -1186,11 +1195,26 @@ def main():
     logger.info(args)
 
     pre_calculation()
+
+    timefile = f"{args.root}/{args.random}_{args.loss}_{str(args.loss_parameter)}_time.pkl"
+    if args.name_tag is not None:
+        timefile = f"{args.root}/{args.name_tag}_time.pkl"
+    time_start = time.process_time()
     dataset = get_dataset(name="no_param", device=device)
+    time_end = time.process_time()
+    time_cost = round(time_end - time_start, 2)
+    with open(timefile, 'ab') as f:
+        pickle.dump([args.parts, time_cost], f)
+
     #torch.set_printoptions(precision=7)
     #print([point.x for point in dataset[25600+6300:25600+6400]])
     # model = get_model(args, device)
+    time_start = time.process_time()
     evaluation(dataset, device, args)
+    time_end = time.process_time()
+    time_cost = round(time_end - time_start, 2)
+    with open(timefile, 'ab') as f:
+        pickle.dump([args.parts, time_cost], f)
 
 if __name__ == "__main__":
     main()
