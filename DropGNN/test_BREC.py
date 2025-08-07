@@ -51,6 +51,8 @@ from torch_geometric.transforms import BaseTransform
 from typing import Dict
 from collections import deque
 
+import tracemalloc
+
 NUM_RELABEL = 32
 P_NORM = 2
 OUTPUT_DIM = 16
@@ -1044,6 +1046,7 @@ def evaluation(dataset, device, args):
         for id in tqdm(range(part_range[0], part_range[1])):
             logger.info(f"ID: {id}")
             time_start = time.process_time()
+            epochs = 0
             for test_count in range(10):
                 dataset_traintest = dataset[
                     id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
@@ -1116,6 +1119,7 @@ def evaluation(dataset, device, args):
                         logger.info("Early Stop Here")
                         break
                     scheduler.step(loss_all)
+                epochs += _
 
                 model.eval()
                 T_square_traintest = T2_calculation(dataset_traintest, True)
@@ -1151,7 +1155,7 @@ def evaluation(dataset, device, args):
 
             #save to file here
             store.append((part_name, id, isomorphic_flag, T_square_traintest, reliability_flag, T_square_reliability,
-                          test_count, time_cost))
+                          test_count+1, time_cost, epochs))
 
         end = time.process_time()
         time_cost_part = round(end - start, 2)
@@ -1188,6 +1192,8 @@ def evaluation(dataset, device, args):
 
 
 def main():
+    tracemalloc.start()
+
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
     logger.remove(handler_id=None)
@@ -1204,7 +1210,7 @@ def main():
     time_end = time.process_time()
     time_cost = round(time_end - time_start, 2)
     with open(timefile, 'ab') as f:
-        pickle.dump([args.parts, time_cost], f)
+        pickle.dump([args, "dataset", time_cost], f)
 
     #torch.set_printoptions(precision=7)
     #print([point.x for point in dataset[25600+6300:25600+6400]])
@@ -1214,7 +1220,12 @@ def main():
     time_end = time.process_time()
     time_cost = round(time_end - time_start, 2)
     with open(timefile, 'ab') as f:
-        pickle.dump([args.parts, time_cost], f)
+        pickle.dump([args, "evaluation", time_cost], f)
+
+    first_size, first_peak = tracemalloc.get_traced_memory()
+
+    with open(timefile, 'ab') as f:
+        pickle.dump([args, "memory", first_size, first_peak], f)
 
 if __name__ == "__main__":
     main()
