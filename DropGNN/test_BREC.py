@@ -1193,6 +1193,8 @@ def evaluation(dataset, device, args):
 
 def main():
     tracemalloc.start()
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.synchronize()
 
     device = torch.device(f"cuda:{args.device}" if torch.cuda.is_available() else "cpu")
 
@@ -1223,9 +1225,11 @@ def main():
         pickle.dump([args, "evaluation", time_cost], f)
 
     first_size, first_peak = tracemalloc.get_traced_memory()
+    torch.cuda.synchronize()
+    peak_alloc = torch.cuda.max_memory_allocated()
 
     with open(timefile, 'ab') as f:
-        pickle.dump([args, "memory", first_size, first_peak], f)
+        pickle.dump([args, "memory", first_size, first_peak, peak_alloc], f)
 
 if __name__ == "__main__":
     main()
