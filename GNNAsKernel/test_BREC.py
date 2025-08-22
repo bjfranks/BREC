@@ -258,7 +258,7 @@ def evaluation(dataset, device, args): # OUT_PATH unused
                 dataset_traintest = dataset[
                     id * NUM_RELABEL * 2 : (id + 1) * NUM_RELABEL * 2
                 ]
-                model = get_model(args, dataset_traintest[0].num_nodes, 1, device)  # num_nodes_list[id]
+                model = get_model(cfg)  # num_nodes_list[id]
                 optimizer = torch.optim.Adam(
                     model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY
                 )
