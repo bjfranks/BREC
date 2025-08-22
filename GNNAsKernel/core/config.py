@@ -10,7 +10,7 @@ def set_cfg(cfg):
     # Additional num of worker for data loading
     cfg.num_workers = 8
     # Cuda device number, used for machine with multiple gpus
-    cfg.device = 1 
+    cfg.device = 0 
     # Additional string add to logging 
     cfg.handtune = ''
     # Whether fix the running seed to remove randomness
