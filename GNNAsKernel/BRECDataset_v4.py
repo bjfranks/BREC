@@ -15,6 +15,11 @@ def graph6_to_pyg(x):
     return from_networkx(nx.from_graph6_bytes(x))
 
 
+def add_x(data):
+    data.x = torch.ones([data.num_nodes, 1]).to(torch.long)
+    return data
+
+
 def load_graphml(path):
     data_list = []
     with open(path, "rb") as f:
@@ -64,6 +69,7 @@ class BRECDataset(InMemoryDataset):
 
         data_list = np.load(self.raw_paths[0], allow_pickle=True)
         data_list = [graph6_to_pyg(data) for data in data_list]
+        data_list = [add_x(data) for data in data_list]
 
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
