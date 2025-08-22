@@ -195,7 +195,6 @@ def evaluation(dataset, device, args): # OUT_PATH unused
             for data in loader:
                 #torch.set_printoptions(threshold=10_000)
                 #print(data.x)
-                print(data)
                 pred = model(data.to(device)).detach()
                 #print(model.state_dict())
                 pred_0_list.extend(pred[0::2])
