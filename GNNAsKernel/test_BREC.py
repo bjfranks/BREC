@@ -176,7 +176,7 @@ def get_model(cfg):
 
 # Stage 4: evaluation
 # Here is for evaluation.
-def evaluation(dataset, device, args):
+def evaluation(dataset, device, OUT_PATH, args): # OUT_PATH unused
     """
     When testing on BREC, even on the same graph, the output embedding may be different,
     because numerical precision problem occur on large graphs, and even the same graph is permuted.
