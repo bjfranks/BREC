@@ -404,7 +404,7 @@ if __name__ == "__main__":
     # cfg = update_cfg(cfg)
 
     # Command Line Arguments
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     NAME = f"h={cfg.subgraph.hops}_layer={cfg.model.num_layers}_minilayer={cfg.model.mini_layers}_hidden={cfg.model.hidden_size}"
     DATASET_NAME = f"{cfg.subgraph.hops}"
