@@ -25,9 +25,9 @@ from core.train_helper import run
 from core.model import GNNAsKernel
 from core.transform import SubgraphsTransform
 
-from ..Xent_Loss import nt_bxent_loss
+from Xent_Loss import nt_bxent_loss
 import pickle
-from ..BRECDataset_Wrapper import BRECDataset
+from BRECDataset_Wrapper import BRECDataset
 
 
 NUM_RELABEL = 32
