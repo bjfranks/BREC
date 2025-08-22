@@ -290,6 +290,7 @@ def evaluation(dataset, device, args): # OUT_PATH unused
 
                         optimizer.zero_grad()
                         #print(data.x)
+                        print(data, data.to(device))
                         pred = model(data.to(device))
                         #print(pred)
                         apart = loss_func(
