@@ -192,10 +192,10 @@ def evaluation(dataset, device, args): # OUT_PATH unused
             loader = torch_geometric.loader.DataLoader(dataset, batch_size=BATCH_SIZE)
             pred_0_list = []
             pred_1_list = []
-            for data in loader:
+            for i, data in enumerate(loader):
                 #torch.set_printoptions(threshold=10_000)
                 #print(data.x)
-                print(data.x)
+                print(i, data.x)
                 pred = model(data.to(device)).detach()
                 #print(model.state_dict())
                 pred_0_list.extend(pred[0::2])
