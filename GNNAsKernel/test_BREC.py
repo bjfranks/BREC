@@ -197,6 +197,7 @@ def evaluation(dataset, device, args): # OUT_PATH unused
                 #print(data.x)
                 print(i, data.x)
                 pred = model(data.to(device)).detach()
+                print(i, data.x)
                 #print(model.state_dict())
                 pred_0_list.extend(pred[0::2])
                 pred_1_list.extend(pred[1::2])
@@ -265,7 +266,6 @@ def evaluation(dataset, device, args): # OUT_PATH unused
                 )
                 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer)  # StepLR(optimizer, gamma=0.5, step_size=250)
-                print(id)
                 dataset_reliability = dataset[
                     (id + SAMPLE_NUM)
                     * NUM_RELABEL
