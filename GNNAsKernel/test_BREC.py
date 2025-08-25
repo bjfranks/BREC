@@ -265,6 +265,7 @@ def evaluation(dataset, device, args): # OUT_PATH unused
                 )
                 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
                     optimizer)  # StepLR(optimizer, gamma=0.5, step_size=250)
+                print(id)
                 dataset_reliability = dataset[
                     (id + SAMPLE_NUM)
                     * NUM_RELABEL
