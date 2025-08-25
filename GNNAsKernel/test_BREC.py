@@ -195,7 +195,8 @@ def evaluation(dataset, device, args): # OUT_PATH unused
             for i, data in enumerate(loader):
                 #torch.set_printoptions(threshold=10_000)
                 #print(data.x)
-                pred = model(data.to(device).type(Int)).detach()
+                data.x = data.x.type(torch.Tensor.int)
+                pred = model(data.to(device)).detach()
                 #print(model.state_dict())
                 pred_0_list.extend(pred[0::2])
                 pred_1_list.extend(pred[1::2])
