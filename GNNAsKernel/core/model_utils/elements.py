@@ -30,7 +30,6 @@ class DiscreteEncoder(nn.Module):
             x = x.unsqueeze(1)
         out = 0
         for i in range(x.size(1)):
-            print(i, x)
             out = out + self.embeddings[i](x[:, i])
         return out
 
