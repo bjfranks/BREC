@@ -195,8 +195,6 @@ def evaluation(dataset, device, args): # OUT_PATH unused
             for i, data in enumerate(loader):
                 #torch.set_printoptions(threshold=10_000)
                 #print(data.x)
-                print(data)
-                print(id)
                 data.x = data.x.to(torch.int)
                 pred = model(data.to(device)).detach()
                 #print(model.state_dict())
