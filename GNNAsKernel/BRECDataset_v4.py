@@ -81,6 +81,8 @@ class BRECDataset(InMemoryDataset):
         torch.save((data, slices), self.processed_paths[0])
 
         data_list = load_graphml(self.raw_paths[1])
+        for graph in data_list:
+            graph.x.to(torch.int)
 
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
@@ -92,6 +94,7 @@ class BRECDataset(InMemoryDataset):
         torch.save((data, slices), self.processed_paths[1])
 
         data_list = load_graphml(self.raw_paths[2])
+        data_list = [add_x(data) for data in data_list]
 
         if self.pre_filter is not None:
             data_list = [data for data in data_list if self.pre_filter(data)]
