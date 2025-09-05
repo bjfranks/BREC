@@ -117,7 +117,7 @@ class Batch(Data):
         if num_nodes is None:
             batch.batch = None
 
-        for key in batch.keys:
+        for key in batch.keys():
             item = batch[key][0]
             if torch.is_tensor(item):
                 batch[key] = torch.cat(batch[key],
