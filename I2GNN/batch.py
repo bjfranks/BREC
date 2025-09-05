@@ -49,7 +49,7 @@ class Batch(Data):
             cumsum['assignment_index_3'] = torch.LongTensor([[0], [0]])
         batch.batch = []
         for i, data in enumerate(data_list):
-            for key in data.keys:
+            for key in data.keys():
                 item = data[key]
                 if torch.is_tensor(item) and item.dtype != torch.bool:
                     item = item + cumsum[key]
