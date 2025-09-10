@@ -162,6 +162,8 @@ parser.add_argument(
     help='Options are a subset of '+str(part_dict.keys())
 )
 parser.add_argument("--name_tag", type=str, default=None)
+parser.add_argument("--logging", type=str, default="default.log")
+parser.add_argument("--root", type=str, default=".")
 
 args = parser.parse_args()
 
