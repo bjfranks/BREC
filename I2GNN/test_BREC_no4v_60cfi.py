@@ -12,7 +12,7 @@ import torch_geometric
 import torch_geometric.loader
 from loguru import logger
 import time
-from BRECDataset_v3 import BRECDataset
+#from BRECDataset_v3 import BRECDataset
 from tqdm import tqdm
 import os
 from torch_geometric.nn.norm import BatchNorm, LayerNorm
@@ -72,7 +72,7 @@ part_dict = {
     # "Distance_Regular": (380, 400),
     "Distance_Regular": (380, 400),
     "CCoHG": (400, 500),
-    "3r2r": (500, 600),
+    #"3r2r": (500, 600),
 }
 parser = argparse.ArgumentParser(description="I2GNN for counting experiments.")
 
