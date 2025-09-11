@@ -69,7 +69,7 @@ class BRECDataset(InMemoryDataset):
             data_list = [data for data in data_list if self.pre_filter(data)]
 
         if self.pre_transform is not None:
-            data_list = [self.pre_transform(data) if i < 320*32 or i >= 380*32 else data
+            data_list = [self.pre_transform(data) if i < 320*64 or (i >= 380*64 and i<(400+320)*64) or (i>(400+380)*64) else data
                          for i, data in enumerate(tqdm(data_list))]
 
         data, slices = self.collate(data_list)
