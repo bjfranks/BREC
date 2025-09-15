@@ -44,7 +44,7 @@ class BRECDataset(InMemoryDataset):
         self.name = name
         super().__init__(root, transform, pre_transform, pre_filter)
 
-        path = self.processed_paths[['original', 'CCoHG', '3r2r', 'pep'].index(split)]
+        path = self.processed_paths[['original', 'CCoHG', '3r2r'].index(split)]
         self.data, self.slices = torch.load(path)
 
     @property
@@ -69,14 +69,8 @@ class BRECDataset(InMemoryDataset):
             data_list = [data for data in data_list if self.pre_filter(data)]
 
         if self.pre_transform is not None:
-            data_list2 = []
-            for i, data in enumerate(tqdm(data_list)):
-                if i < 320 * 64 or (i >= 380 * 64 and i < (400 + 320) * 64) or (i > (400 + 380) * 64):
-                    data_list2.append(self.pre_transform(data))
-                else:
-                    data_list2.append(torch_geometric.data.Data(dtype=torch.float))
-            #data_list = [self.pre_transform(data) if i < 320*64 or (i >= 380*64 and i<(400+320)*64) or (i>(400+380)*64) else data
-            #             for i, data in enumerate(tqdm(data_list))]
+            data_list = [self.pre_transform(data) if i < 320*64 or (i >= 380*64 and i<(400+320)*64) or (i>(400+380)*64) else torch_geometric.data.Data(dtype=torch.float)
+                         for i, data in enumerate(tqdm(data_list))]
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
