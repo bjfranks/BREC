@@ -69,10 +69,14 @@ class BRECDataset(InMemoryDataset):
             data_list = [data for data in data_list if self.pre_filter(data)]
 
         if self.pre_transform is not None:
-            data_list = [self.pre_transform(data) if i < 320*64 or (i >= 380*64 and i<(400+320)*64) or (i>(400+380)*64) else torch_geometric.data.Data(dtype=torch.float)
+            data_list = [self.pre_transform(data) if i < 320*64 or (i >= 380*64 and i<(400+320)*64) or (i>(400+380)*64)
+                         else torch_geometric.data.Data(node_to_subgraph2=torch.empty((0)), z=torch.empty((0, 4)),
+                                                        edge_index=torch.empty((2, 0)), center_idx=torch.empty((0, 2)),
+                                                        subgraph2_to_subgraph=torch.empty((0)), num_nodes=0,
+                                                        num_subgraphs=0, node_to_original_node=torch.empty((0)),
+                                                        num_original_nodes=0, subgraph_to_graph=torch.empty((0)),
+                                                        subgraph2_to_graph=torch.empty((0)), dtype=torch.float)
                          for i, data in enumerate(tqdm(data_list))]
-            print(data_list[0])
-            print(data_list[0].x)
 
         data, slices = self.collate(data_list)
         torch.save((data, slices), self.processed_paths[0])
