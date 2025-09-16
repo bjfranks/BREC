@@ -304,7 +304,7 @@ def evaluation(dataset, device, args):
            #139, 140, 142, 143, 149, 151, 152, 153, 154, 157, 158, 64, 111, 125, 127, 132, 133,
            #136, 137, 141, 144, 146, 150, 159, 117, 145, 148, 155, 156, 126, 130, 135, 147, 122]
 
-    file = f"{args.root}/{args.random}_{args.loss}_{str(args.loss_parameter)}.pkl"
+    file = f"default.pkl"
     if args.name_tag is not None:
         file = f"{args.root}/{args.name_tag}.pkl"
 
