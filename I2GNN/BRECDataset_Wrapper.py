@@ -28,13 +28,7 @@ class BRECDataset(InMemoryDataset):
                                                  transform=transform,
                                                  pre_transform=pre_transform,
                                                  pre_filter=pre_filter,
-                                                 split="CCoHG"),
-                      BRECDataset_v4.BRECDataset(name=name,
-                                                 root=root,
-                                                 transform=transform,
-                                                 pre_transform=pre_transform,
-                                                 pre_filter=pre_filter,
-                                                 split="3r2r")
+                                                 split="CCoHG")
                       ]
 
     def __len__(self):
