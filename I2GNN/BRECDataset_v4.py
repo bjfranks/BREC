@@ -75,7 +75,7 @@ class BRECDataset(InMemoryDataset):
                                                         subgraph2_to_subgraph=torch.empty((0)), num_nodes=0,
                                                         num_subgraphs=0, node_to_original_node=torch.empty((0)),
                                                         num_original_nodes=0, subgraph_to_graph=torch.empty((0)),
-                                                        subgraph2_to_graph=torch.empty((0)), dtype=torch.float)
+                                                        subgraph2_to_graph=torch.empty((0)), dtype=torch.int)
                          for i, data in enumerate(tqdm(data_list))]
 
         data, slices = self.collate(data_list)
