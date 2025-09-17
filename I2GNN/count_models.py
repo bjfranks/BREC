@@ -199,6 +199,7 @@ class I2GNN(torch.nn.Module):
             print(data.node_to_subgraph2)
             print(data.node_to_subgraph2.shape)
             x = global_add_pool(x, data.node_to_subgraph2)
+            print(x.shape)
             x = self.edge_pooling_nn(x)
             # x_e = global_add_pool(x, data.node_to_subgraph2)
             # x = torch.cat([x, x_e], dim=-1)
