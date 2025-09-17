@@ -356,6 +356,7 @@ def evaluation(dataset, device, args):
 
                         optimizer.zero_grad()
                         #print(data.x)
+                        print(data)
                         pred = model(data.to(device))
                         #print(pred)
                         apart = loss_func(
