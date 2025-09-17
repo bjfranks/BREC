@@ -195,7 +195,9 @@ class I2GNN(torch.nn.Module):
         # subgraph-level pooling
         if self.subgraph_pooling == 'mean':
             print(x)
+            print(x.shape)
             print(data.node_to_subgraph2)
+            print(data.node_to_subgraph2.shape)
             x = global_add_pool(x, data.node_to_subgraph2)
             x = self.edge_pooling_nn(x)
             # x_e = global_add_pool(x, data.node_to_subgraph2)
@@ -203,7 +205,9 @@ class I2GNN(torch.nn.Module):
             # x = self.edge_pooling_nn(x)
             # x = global_add_pool(x, data.node_to_subgraph2)
             print(x)
+            print(x.shape)
             print(data.subgraph2_to_subgraph)
+            print(data.subgraph2_to_subgraph.shape)
             x = global_add_pool(x, data.subgraph2_to_subgraph)
             x = self.node_pooling_nn(x)
             # x = global_add_pool(x, data.node_to_subgraph_node)
